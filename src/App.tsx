@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import CircuitCanvas from './components/CircuitCanvas';
 import CardLibrary from './components/CardLibrary';
+import CardGenerator from './components/CardGenerator';
 import { CircuitCard } from './types/CircuitTypes';
 import { defaultCards } from './data/defaultCards';
 
@@ -12,6 +13,10 @@ const App: React.FC = () => {
   
   const addCardToStack = (card: CircuitCard) => {
     setStackedCards([...stackedCards, { ...card, id: `${card.id}-${Date.now()}` }]);
+  };
+  
+  const addCardToLibrary = (card: CircuitCard) => {
+    setAvailableCards([...availableCards, card]);
   };
   
   const removeCardFromStack = (index: number) => {
@@ -98,11 +103,16 @@ const App: React.FC = () => {
         </div>
       )}
       
-      <h2>Card Library</h2>
-      <CardLibrary 
-        availableCards={availableCards} 
-        addCardToStack={addCardToStack} 
-      />
+      <div className="library-section" style={{ marginTop: '20px' }}>
+        <h2>Card Generator</h2>
+        <CardGenerator addCardToLibrary={addCardToLibrary} />
+        
+        <h2 style={{ marginTop: '20px' }}>Card Library</h2>
+        <CardLibrary 
+          availableCards={availableCards} 
+          addCardToStack={addCardToStack} 
+        />
+      </div>
     </div>
   );
 };

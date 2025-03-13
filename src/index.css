@@ -7,6 +7,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   background-color: #121212;
   color: #e0e0e0;
+  padding: 20px;
 }
 
 code {
@@ -15,49 +16,141 @@ code {
 }
 
 .container {
-  padding: 20px;
   max-width: 1200px;
   margin: 0 auto;
 }
 
+h1, h2, h3 {
+  color: #ffffff;
+}
+
 .canvas-container {
-  width: 100%;
-  height: 70vh;
-  position: relative;
-  border: 1px solid #444;
+  border: 1px solid #333;
   border-radius: 8px;
+  margin-bottom: 20px;
+  height: 400px;
   overflow: hidden;
+  position: relative;
 }
 
 .controls {
-  margin-top: 20px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  margin-bottom: 20px;
   align-items: center;
+  gap: 10px;
 }
 
-button {
-  background-color: #4a4a4a;
+.controls button {
+  padding: 8px 15px;
+  background-color: #333;
   color: white;
   border: none;
-  padding: 8px 16px;
   border-radius: 4px;
   cursor: pointer;
-  transition: background-color 0.3s;
+  transition: background-color 0.2s;
 }
 
-button:hover {
-  background-color: #5a5a5a;
+.controls button:hover {
+  background-color: #444;
 }
 
-button:active {
-  background-color: #3a3a3a;
+.finalize-button {
+  background-color: #6a4aa5 !important;
+  color: white;
+}
+
+.finalize-button:hover {
+  background-color: #7c5ab7 !important;
 }
 
 .card-library {
-  margin-top: 20px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 15px;
+  margin-top: 10px;
+}
+
+.library-card {
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.library-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(0,0,0,0.3) !important;
+}
+
+.algorithm-response {
+  margin-top: 20px;
+  margin-bottom: 20px;
+}
+
+.algorithm-response pre {
+  max-height: 400px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+/* Card Generator Styles */
+.card-generator {
+  margin-bottom: 20px;
+}
+
+.card-generator-header {
+  transition: background-color 0.2s;
+}
+
+.card-generator-header:hover {
+  background-color: #3a3a3a !important;
+}
+
+.card-generator form {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+.card-generator input,
+.card-generator select {
+  transition: border-color 0.2s;
+}
+
+.card-generator input:focus,
+.card-generator select:focus {
+  border-color: #4a90e2 !important;
+  outline: none;
+}
+
+.card-generator button {
+  transition: background-color 0.2s, transform 0.1s;
+}
+
+.card-generator button:hover {
+  background-color: #5a9fe2 !important;
+}
+
+.card-generator button:active {
+  transform: scale(0.98);
+}
+
+.card-generator button[type="button"]:hover {
+  background-color: #555 !important;
+}
+
+.library-section {
+  background-color: #1a1a1a;
+  border-radius: 8px;
+  padding: 20px;
+  margin-top: 20px;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 } 

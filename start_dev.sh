@@ -8,6 +8,9 @@ NC='\033[0m' # No Color
 
 echo -e "${YELLOW}Starting Circuit Card Simulator in development mode...${NC}"
 
+# Activate Python 3.11 virtual environment
+source venv311/bin/activate
+
 # Check if we should start both frontend and backend or just one
 if [ "$1" == "frontend" ]; then
     # Start only frontend
@@ -40,6 +43,9 @@ else
         kill $FRONTEND_PID
     fi
 fi
+
+# Deactivate virtual environment at the end (this won't run in the case where we keep the backend running)
+deactivate
 
 echo -e "${GREEN}Development servers started!${NC}"
 echo -e "Frontend: http://localhost:3000"
