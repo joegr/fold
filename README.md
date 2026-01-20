@@ -2,6 +2,8 @@
 
 A web-based simulation system for visualizing stackable circuit cards with matrix logic and predefined mesh layer interactions, capable of generating custom encryption algorithms based on circuit design.
 
+WARNING: Do not use for prod encryption use only for local/server visualization of encryption concepts and proofs.
+
 ## Features
 
 - Create circuit cards with custom logic elements
