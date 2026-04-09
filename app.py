@@ -1,7 +1,11 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from functools import wraps
 import os
 import json
+import logging
 import numpy as np
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
@@ -11,9 +15,153 @@ import hashlib
 import time
 import inspect
 
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+ALLOWED_ORIGINS = os.environ.get(
+    'ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:5000'
+).split(',')
+API_KEY = os.environ.get('API_KEY', None)
+MAX_CARDS = int(os.environ.get('MAX_CARDS', '20'))
+MAX_NODES_PER_CARD = int(os.environ.get('MAX_NODES_PER_CARD', '16'))
+MAX_REQUEST_SIZE = int(os.environ.get('MAX_REQUEST_SIZE', str(1 * 1024 * 1024)))  # 1 MB
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+)
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# App init
+# ---------------------------------------------------------------------------
 app = Flask(__name__, static_folder='build')
-CORS(app)
+app.config['MAX_CONTENT_LENGTH'] = MAX_REQUEST_SIZE
+CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
+limiter = Limiter(get_remote_address, app=app, default_limits=["60 per minute"])
 encryption_records = []
+
+ALLOWED_GATE_TYPES = frozenset({'AND', 'OR', 'XOR', 'NOT', 'NAND', 'NOR', 'BUFFER'})
+ALLOWED_CARD_TYPES = frozenset({
+    'processor', 'memory', 'io', 'custom', 'network',
+    'logic', 'matrix', 'hybrid', 'basic',
+})
+
+
+# ---------------------------------------------------------------------------
+# Security helpers
+# ---------------------------------------------------------------------------
+def require_api_key(f):
+    """Decorator that enforces API-key auth when API_KEY is configured."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if API_KEY is None:
+            return f(*args, **kwargs)
+        key = request.headers.get('X-API-Key')
+        if not key or key != API_KEY:
+            return jsonify({'error': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
+def validate_circuit_data(data):
+    """Validate and sanitize incoming circuit data. Returns (cleaned, error)."""
+    if not isinstance(data, dict):
+        return None, 'Request body must be a JSON object'
+    cards = data.get('cards')
+    if not isinstance(cards, list) or len(cards) == 0:
+        return None, 'Missing or empty cards array'
+    if len(cards) > MAX_CARDS:
+        return None, f'Too many cards (max {MAX_CARDS})'
+
+    cleaned_cards = []
+    for idx, card in enumerate(cards):
+        if not isinstance(card, dict):
+            return None, f'Card at index {idx} is not an object'
+
+        card_type = str(card.get('type', 'basic'))
+        if card_type not in ALLOWED_CARD_TYPES:
+            card_type = 'basic'
+
+        color = str(card.get('color', 'gray'))[:20]
+
+        # Sanitize nodes
+        raw_nodes = card.get('nodes', [])
+        if not isinstance(raw_nodes, list):
+            raw_nodes = []
+        nodes = raw_nodes[:MAX_NODES_PER_CARD]
+
+        # Sanitize matrix connections
+        raw_conns = card.get('matrixConnections', [])
+        if not isinstance(raw_conns, list):
+            raw_conns = []
+        connections = []
+        for conn in raw_conns[:64]:
+            if isinstance(conn, dict) and conn.get('active'):
+                connections.append({
+                    'id': str(conn.get('id', ''))[:64],
+                    'active': True,
+                    'fromX': float(conn.get('fromX', 0)),
+                    'fromY': float(conn.get('fromY', 0)),
+                    'toX': float(conn.get('toX', 0)),
+                    'toY': float(conn.get('toY', 0)),
+                })
+
+        # Sanitize mesh interaction points
+        raw_mesh = card.get('meshInteractionPoints', [])
+        if not isinstance(raw_mesh, list):
+            raw_mesh = []
+        mesh_points = []
+        for pt in raw_mesh[:32]:
+            if isinstance(pt, dict):
+                mesh_points.append({
+                    'id': str(pt.get('id', ''))[:64],
+                    'x': float(pt.get('x', 0)),
+                    'y': float(pt.get('y', 0)),
+                    'upConnections': [str(c)[:64] for c in pt.get('upConnections', [])[:16] if isinstance(c, str)],
+                    'downConnections': [str(c)[:64] for c in pt.get('downConnections', [])[:16] if isinstance(c, str)],
+                })
+
+        # Sanitize logic gates — only allow known types
+        raw_gates = card.get('logicGates', [])
+        if not isinstance(raw_gates, list):
+            raw_gates = []
+        logic_gates = []
+        for gate in raw_gates[:16]:
+            if isinstance(gate, dict):
+                gate_type = str(gate.get('type', 'BUFFER'))
+                if gate_type not in ALLOWED_GATE_TYPES:
+                    gate_type = 'BUFFER'
+                logic_gates.append({
+                    'id': str(gate.get('id', ''))[:64],
+                    'type': gate_type,
+                    'x': float(gate.get('x', 0)),
+                    'y': float(gate.get('y', 0)),
+                })
+
+        cleaned_cards.append({
+            'id': str(card.get('id', f'card-{idx}'))[:64],
+            'type': card_type,
+            'color': color,
+            'nodes': nodes,
+            'matrixConnections': connections,
+            'meshInteractionPoints': mesh_points,
+            'logicGates': logic_gates,
+        })
+
+    return {'cards': cleaned_cards}, None
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    )
+    return response
 
 # Define the CircuitEncryption class template that will be used to generate custom encryption algorithms
 class CircuitEncryption:
@@ -76,35 +224,71 @@ class CircuitEncryption:
         return bytes(derived_key[:32])
     
     def apply_circuit_transformation(self, data, key):
-        """Apply the circuit logic to transform data."""
-        # Convert data to bytearray for manipulation
+        """Apply the circuit logic to transform data (fully reversible)."""
         data_array = bytearray(data)
-        
-        # Apply circuit transformations based on connection matrix
-        for round in range(self.PERMUTATION_ROUNDS):
-            # Apply substitution using key and connection matrix
+
+        for round_num in range(self.PERMUTATION_ROUNDS):
+            # Step 1 – key + matrix substitution (reverse: subtract mod 256)
             for i in range(len(data_array)):
                 row = i % len(self.connection_matrix)
-                col = (i + round) % len(self.connection_matrix[0])
+                col = (i + round_num) % len(self.connection_matrix[0])
                 matrix_val = self.connection_matrix[row][col]
                 key_byte = key[i % len(key)]
-                # Ensure key_byte is an integer
                 if isinstance(key_byte, str):
                     key_byte = ord(key_byte)
                 data_array[i] = (data_array[i] + (key_byte ^ matrix_val)) % 256
-            
-            # Apply logic gate operations
+
+            # Step 2 – XOR diffusion (forward pass; reverse via backward pass)
             for i in range(len(data_array) - 1):
-                op_idx = (i + round) % len(self.logic_operations)
-                data_array[i] = self.logic_operations[op_idx](data_array[i], data_array[i+1])
-            
-            # Permute bytes based on the circuit layout
+                key_byte = key[(i + round_num) % len(key)]
+                if isinstance(key_byte, str):
+                    key_byte = ord(key_byte)
+                data_array[i] ^= ((data_array[i + 1] + key_byte) % 256)
+
+            # Step 3 – byte permutation (reverse: inverse permutation)
             if len(data_array) > 1:
+                perm_val = self.connection_matrix[
+                    round_num % len(self.connection_matrix)
+                ][round_num % len(self.connection_matrix[0])]
                 temp = bytearray(data_array)
                 for i in range(len(data_array)):
-                    dest = (i + matrix_val) % len(data_array)
+                    dest = (i + perm_val) % len(data_array)
                     data_array[dest] = temp[i]
-        
+
+        return bytes(data_array)
+
+    def reverse_circuit_transformation(self, data, key):
+        """Reverse the circuit transformation (exact inverse)."""
+        data_array = bytearray(data)
+
+        for round_num in range(self.PERMUTATION_ROUNDS - 1, -1, -1):
+            # Step 3 reverse – undo permutation
+            if len(data_array) > 1:
+                perm_val = self.connection_matrix[
+                    round_num % len(self.connection_matrix)
+                ][round_num % len(self.connection_matrix[0])]
+                temp = bytearray(data_array)
+                for i in range(len(data_array)):
+                    src = (i + perm_val) % len(data_array)
+                    data_array[i] = temp[src]
+
+            # Step 2 reverse – undo XOR diffusion (backward pass)
+            for i in range(len(data_array) - 2, -1, -1):
+                key_byte = key[(i + round_num) % len(key)]
+                if isinstance(key_byte, str):
+                    key_byte = ord(key_byte)
+                data_array[i] ^= ((data_array[i + 1] + key_byte) % 256)
+
+            # Step 1 reverse – undo substitution
+            for i in range(len(data_array)):
+                row = i % len(self.connection_matrix)
+                col = (i + round_num) % len(self.connection_matrix[0])
+                matrix_val = self.connection_matrix[row][col]
+                key_byte = key[i % len(key)]
+                if isinstance(key_byte, str):
+                    key_byte = ord(key_byte)
+                data_array[i] = (data_array[i] - (key_byte ^ matrix_val)) % 256
+
         return bytes(data_array)
     
     def encrypt(self, plaintext, key):
@@ -135,56 +319,25 @@ class CircuitEncryption:
     
     def decrypt(self, ciphertext, key):
         """Decrypt data using the circuit-based algorithm."""
-        # Derive the key
         circuit_key = self.derive_key(key)
-        
-        # Decode
+
         encrypted_data = base64.b64decode(ciphertext)
         iv = encrypted_data[:16]
         actual_ciphertext = encrypted_data[16:]
-        
-        # Decrypt with AES
+
         cipher = Cipher(algorithms.AES(circuit_key), modes.CBC(iv), backend=default_backend())
         decryptor = cipher.decryptor()
         transformed = decryptor.update(actual_ciphertext) + decryptor.finalize()
-        
-        # Reverse circuit transformation
-        data_array = bytearray(transformed)
-        
-        # Apply inverse transformations in reverse order
-        for round in range(self.PERMUTATION_ROUNDS - 1, -1, -1):
-            # Undo permutation
-            if len(data_array) > 1:
-                temp = bytearray(data_array)
-                for i in range(len(data_array)):
-                    dest = (i + self.connection_matrix[i % len(self.connection_matrix)][
-                        (i + round) % len(self.connection_matrix[0])]) % len(data_array)
-                    data_array[i] = temp[dest]
-            
-            # Logic operations are harder to inverse, so we apply a reversing transformation
-            for i in range(len(data_array) - 1, 0, -1):
-                op_idx = (i - 1 + round) % len(self.logic_operations)
-                # XOR itself is reversible
-                data_array[i-1] = data_array[i-1] ^ (data_array[i] & 0x55)
-            
-            # Undo substitution
-            for i in range(len(data_array) - 1, -1, -1):
-                row = i % len(self.connection_matrix)
-                col = (i + round) % len(self.connection_matrix[0])
-                matrix_val = self.connection_matrix[row][col]
-                key_byte = circuit_key[i % len(circuit_key)]
-                # Ensure key_byte is an integer
-                if isinstance(key_byte, str):
-                    key_byte = ord(key_byte)
-                data_array[i] = (data_array[i] - (key_byte ^ matrix_val)) % 256
-        
-        reversed_transform = bytes(data_array)
-        
-        # Remove padding
+
+        reversed_transform = self.reverse_circuit_transformation(transformed, circuit_key)
+
         unpadder = padding.PKCS7(128).unpadder()
         plaintext = unpadder.update(reversed_transform) + unpadder.finalize()
-        
-        return plaintext.decode('utf-8')
+
+        try:
+            return plaintext.decode('utf-8')
+        except UnicodeDecodeError:
+            return plaintext
 
 
 def analyze_circuit(circuit_data):
@@ -274,6 +427,68 @@ def analyze_circuit(circuit_data):
         'summary': circuit_summary
     }
 
+def create_encryption_from_analysis(circuit_analysis):
+    """Create a configured CircuitEncryption instance directly from analysis.
+
+    This avoids the need for exec() when consuming generated algorithms
+    programmatically (e.g. in tests).
+    """
+    summary = circuit_analysis['summary']
+
+    constants = {
+        'KEY_ROUNDS': max(2, min(16, summary['num_cards'] + 2)),
+        'MATRIX_SIZE': max(4, min(32, summary['num_nodes'] // 2)),
+        'PERMUTATION_ROUNDS': max(1, min(8, summary['num_connections'] // 2)),
+    }
+
+    circuit_seed = ''.join(
+        summary['card_types'] + summary['card_colors'] + summary['logic_gate_types']
+    )
+    constants['CIRCUIT_SEED'] = hashlib.sha256(circuit_seed.encode()).hexdigest()[:16]
+
+    size = constants['MATRIX_SIZE']
+    conn_matrix = [[0] * size for _ in range(size)]
+
+    connections = circuit_analysis['connections']
+    for conn in connections:
+        row = int(conn.get('fromX', 0) * 100) % size
+        col = int(conn.get('fromY', 0) * 100) % size
+        val = int(conn.get('toX', 0.5) * 100 + conn.get('toY', 0.5) * 100) % 256
+        conn_matrix[row][col] = val
+
+    if len(connections) < size:
+        seed_array = [int(constants['CIRCUIT_SEED'][i:i+2], 16) for i in range(0, 16, 2)]
+        for i in range(size):
+            if sum(conn_matrix[i]) == 0:
+                for j in range(size):
+                    if conn_matrix[i][j] == 0:
+                        conn_matrix[i][j] = seed_array[(i + j) % len(seed_array)]
+
+    _gate_to_lambda = {
+        'AND':    lambda b1, b2: (b1 & b2),
+        'OR':     lambda b1, b2: (b1 | b2),
+        'XOR':    lambda b1, b2: (b1 ^ b2),
+        'NOT':    lambda b1, b2: (~b1 & 0xFF),
+        'NAND':   lambda b1, b2: (~(b1 & b2) & 0xFF),
+        'NOR':    lambda b1, b2: (~(b1 | b2) & 0xFF),
+        'BUFFER': lambda b1, b2: b1,
+    }
+
+    logic_gates = circuit_analysis['logic_gates']
+    logic_ops = [
+        _gate_to_lambda.get(gate.get('type', 'BUFFER'), _gate_to_lambda['BUFFER'])
+        for gate in logic_gates
+    ]
+    if not logic_ops:
+        logic_ops = [lambda b1, b2: (b1 ^ b2)]
+
+    return CircuitEncryption(
+        key_derivation_constants=constants,
+        connection_matrix=conn_matrix,
+        logic_operations=logic_ops,
+    )
+
+
 def generate_encryption_algorithm(circuit_analysis):
     """Generate encryption algorithm based on circuit analysis"""
     summary = circuit_analysis['summary']
@@ -310,32 +525,33 @@ def generate_encryption_algorithm(circuit_analysis):
                     if conn_matrix[i, j] == 0:
                         conn_matrix[i, j] = seed_array[(i+j) % len(seed_array)]
     
-    # Map logic gates to operations
+    # Map logic gates to valid lambda expressions (no assignments)
     logic_gate_map = {
-        'AND': 'result = (byte1 & byte2)',
-        'OR': 'result = (byte1 | byte2)',
-        'XOR': 'result = (byte1 ^ byte2)',
-        'NOT': 'result = (~byte1 & 0xFF)',
-        'NAND': 'result = (~(byte1 & byte2) & 0xFF)',
-        'NOR': 'result = (~(byte1 | byte2) & 0xFF)',
-        'BUFFER': 'result = byte1'
+        'AND': '(byte1 & byte2)',
+        'OR': '(byte1 | byte2)',
+        'XOR': '(byte1 ^ byte2)',
+        'NOT': '(~byte1 & 0xFF)',
+        'NAND': '(~(byte1 & byte2) & 0xFF)',
+        'NOR': '(~(byte1 | byte2) & 0xFF)',
+        'BUFFER': 'byte1',
     }
     
-    # Construct logic operations
+    # Construct logic operations — only allow known gate types
     logic_gates = circuit_analysis['logic_gates']
-    logic_ops = [logic_gate_map.get(gate.get('type', 'BUFFER'), 'result = byte1') 
-                for gate in logic_gates]
+    logic_ops = []
+    for gate in logic_gates:
+        gate_type = gate.get('type', 'BUFFER')
+        if gate_type not in logic_gate_map:
+            gate_type = 'BUFFER'
+        logic_ops.append(logic_gate_map[gate_type])
     
     # Add default if no logic gates
     if not logic_ops:
-        logic_ops = ['result = (byte1 ^ byte2)', 
-                    'result = ((result << 1) | (result >> 7)) & 0xFF']
+        logic_ops = ['(byte1 ^ byte2)',
+                     '(((byte1 << 1) | (byte1 >> 7)) & 0xFF)']
     
-    # Convert logic operations to lambda functions
-    logic_lambdas = []
-    for op in logic_ops:
-        # Create a function from the operation string
-        logic_lambdas.append(f"lambda byte1, byte2: {op}")
+    # Build lambda source strings
+    logic_lambdas = [f"lambda byte1, byte2: {op}" for op in logic_ops]
     
     # Generate Python code for the custom encryption class
     code = [
@@ -404,56 +620,70 @@ def generate_encryption_algorithm(circuit_analysis):
     algorithm_code = "\n".join(code)
     return algorithm_code
 
+# ---------------------------------------------------------------------------
 # API Routes
+# ---------------------------------------------------------------------------
 @app.route('/api/generate_encryption', methods=['POST'])
+@require_api_key
+@limiter.limit("10 per minute")
 def api_generate_encryption():
     """Generate encryption algorithm from circuit data"""
     try:
-        circuit_data = request.get_json()
-        
-        if not circuit_data or 'cards' not in circuit_data:
-            return jsonify({'error': 'Missing required circuit data'}), 400
-        
-        analysis = analyze_circuit(circuit_data)
+        circuit_data = request.get_json(silent=True)
+        if circuit_data is None:
+            return jsonify({'error': 'Invalid or missing JSON body'}), 400
+
+        cleaned, err = validate_circuit_data(circuit_data)
+        if err:
+            return jsonify({'error': err}), 400
+
+        analysis = analyze_circuit(cleaned)
         algorithm = generate_encryption_algorithm(analysis)
-        
+
         encryption_records.append({
             'timestamp': time.time(),
-            'cards_count': len(circuit_data.get('cards', [])),
+            'cards_count': len(cleaned.get('cards', [])),
             'complexity': analysis['summary']['complexity_score'],
-            'algorithm_size': len(algorithm)
+            'algorithm_size': len(algorithm),
         })
-        
+
         return jsonify({
             'algorithm': algorithm,
-            'analysis': analysis['summary']
+            'analysis': analysis['summary'],
         })
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+
+    except Exception:
+        logger.exception('Error generating encryption algorithm')
+        return jsonify({'error': 'Internal server error'}), 500
+
 
 @app.route('/api/history', methods=['GET'])
+@require_api_key
 def api_history():
     """Get history of encryption algorithms generated"""
     return jsonify({'records': encryption_records})
+
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve(path):
     """Serve the React frontend"""
-    if path != "" and os.path.exists(app.static_folder + '/' + path):
+    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
         return send_from_directory(app.static_folder, path)
     return send_from_directory(app.static_folder, 'index.html')
+
 
 @app.route('/api/status')
 def api_status():
     """API status check endpoint"""
     return jsonify({
         'status': 'online',
-        'version': '1.0.0',
-        'endpoints': ['/api/generate_encryption', '/api/history', '/api/status']
+        'version': '1.1.0',
+        'endpoints': ['/api/generate_encryption', '/api/history', '/api/status'],
     })
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port) 
+    debug = os.environ.get('FLASK_DEBUG', '0') == '1'
+    app.run(host='0.0.0.0', port=port, debug=debug)

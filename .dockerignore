@@ -1,0 +1,12 @@
+node_modules
+venv
+venv311
+__pycache__
+.git
+.env
+.env.*
+!.env.example
+build
+dist
+*.pyc
+.DS_Store
