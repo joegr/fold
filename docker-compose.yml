@@ -1,0 +1,50 @@
+# ─────────────────────────────────────────────────────────────
+# Circuit Card Simulator – Docker Compose
+#
+# Usage:
+#   docker compose up              # start production server
+#   docker compose run --rm test   # run unit tests
+#   docker compose up dev          # start Flask dev server
+# ─────────────────────────────────────────────────────────────
+
+services:
+  # ── Production server (gunicorn) ──────────────────────────
+  app:
+    build:
+      context: .
+      target: production
+    ports:
+      - "${PORT:-5000}:5000"
+    env_file:
+      - .env
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  # ── Test runner ───────────────────────────────────────────
+  test:
+    build:
+      context: .
+      target: test
+    profiles:
+      - test
+    env_file:
+      - .env
+
+  # ── Dev server (Flask debug mode) ────────────────────────
+  dev:
+    build:
+      context: .
+      target: base
+    ports:
+      - "${PORT:-5000}:5000"
+    env_file:
+      - .env
+    environment:
+      - FLASK_DEBUG=1
+    command: ["python", "app.py"]
+    profiles:
+      - dev

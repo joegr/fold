@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # Script to set up a virtual environment for testing circuit encryption algorithms
 
 # Colors for better readability
@@ -87,20 +88,17 @@ if [[ $(echo "$PYTHON_VERSION >= 3.12" | bc -l) -eq 1 ]]; then
     # If original requirements file exists, use it as a base
     if [ -f "requirements.txt" ]; then
         # Relax version constraints for Python 3.12+ compatibility
-        cat requirements.txt | sed 's/numpy==1.25.2/numpy>=1.26.0/g' | \
-                              sed 's/flask==2.3.3/flask>=2.3.3/g' | \
-                              sed 's/flask-cors==4.0.0/flask-cors>=4.0.0/g' | \
-                              sed 's/cryptography==41.0.3/cryptography>=41.0.3/g' | \
-                              sed 's/gunicorn==21.2.0/gunicorn>=21.2.0/g' > "$TMP_REQUIREMENTS"
+        cat requirements.txt | sed 's/==/>=/g' > "$TMP_REQUIREMENTS"
         echo -e "${YELLOW}Using modified requirements with relaxed version constraints.${NC}"
     else
         # Create a basic requirements file
         cat > "$TMP_REQUIREMENTS" << EOF
-flask>=2.3.3
-flask-cors>=4.0.0
-cryptography>=41.0.3
-numpy>=1.26.0
-gunicorn>=21.2.0
+flask>=3.1.0
+flask-cors>=5.0.1
+flask-limiter>=3.8.0
+cryptography>=44.0.0
+numpy>=2.2.4
+gunicorn>=23.0.0
 EOF
         echo -e "${YELLOW}Created a basic requirements file.${NC}"
     fi
@@ -112,7 +110,7 @@ EOF
         echo -e "${YELLOW}Trying to install packages individually without version constraints...${NC}"
         
         # Packages to install
-        PACKAGES=("flask" "flask-cors" "cryptography" "numpy" "gunicorn")
+        PACKAGES=("flask" "flask-cors" "flask-limiter" "cryptography" "numpy" "gunicorn")
         
         for package in "${PACKAGES[@]}"; do
             echo -e "${YELLOW}Installing $package...${NC}"
@@ -134,11 +132,11 @@ else
         if ! pip install -r requirements.txt; then
             echo -e "${RED}Error: Failed to install requirements.${NC}"
             echo -e "${YELLOW}Trying to install core packages without version constraints...${NC}"
-            pip install flask flask-cors cryptography numpy
+            pip install flask flask-cors flask-limiter cryptography numpy
         fi
     else
         echo -e "${YELLOW}requirements.txt not found. Installing core dependencies manually.${NC}"
-        pip install flask flask-cors cryptography numpy
+        pip install flask flask-cors flask-limiter cryptography numpy
     fi
 fi
 
@@ -146,7 +144,7 @@ fi
 echo -e "${YELLOW}Verifying installed packages...${NC}"
 missing_packages=false
 
-for package in flask flask-cors cryptography numpy; do
+for package in flask flask-cors flask-limiter cryptography numpy; do
     if ! pip show $package &>/dev/null; then
         echo -e "${RED}Warning: $package is not installed.${NC}"
         missing_packages=true

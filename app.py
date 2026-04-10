@@ -5,7 +5,6 @@ from flask_limiter.util import get_remote_address
 from functools import wraps
 import math
 import os
-import json
 import logging
 import numpy as np
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -213,8 +212,16 @@ class CircuitEncryption:
         })
         if key_derivation_constants:
             for key, value in key_derivation_constants.items():
-                if key in _ALLOWED_CONSTANT_KEYS:
-                    setattr(self, key, value)
+                if key not in _ALLOWED_CONSTANT_KEYS:
+                    continue
+                if key == 'CIRCUIT_SEED':
+                    setattr(self, key, str(value)[:64])
+                else:
+                    if not isinstance(value, int) or value < 1:
+                        continue
+                    # Clamp numeric constants to safe upper bounds
+                    limits = {'KEY_ROUNDS': 64, 'MATRIX_SIZE': 64, 'PERMUTATION_ROUNDS': 32}
+                    setattr(self, key, min(value, limits.get(key, 256)))
                 
         if connection_matrix is not None:
             self.connection_matrix = connection_matrix
@@ -350,6 +357,8 @@ class CircuitEncryption:
         circuit_key = self.derive_key(key)
 
         encrypted_data = base64.b64decode(ciphertext)
+        if len(encrypted_data) < 32:
+            raise ValueError('Ciphertext too short (must contain IV + at least one block)')
         iv = encrypted_data[:16]
         actual_ciphertext = encrypted_data[16:]
 
@@ -691,6 +700,7 @@ def api_generate_encryption():
 
 @app.route('/api/history', methods=['GET'])
 @require_api_key
+@limiter.limit("60 per minute")
 def api_history():
     """Get history of encryption algorithms generated"""
     return jsonify({'records': encryption_records})

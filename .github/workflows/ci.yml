@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create .env from template
+        run: cp .env.example .env
+
+      - name: Build test image
+        run: docker compose build test
+
+      - name: Run unit tests
+        run: docker compose run --rm test
+
+      - name: Build production image
+        run: docker compose build app
+
+      - name: Smoke-test production container
+        run: |
+          docker compose up app -d
+          sleep 3
+          curl -sf http://localhost:5000/api/status | grep '"status":"online"'
+          docker compose down

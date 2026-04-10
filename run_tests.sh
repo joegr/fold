@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # Script to run tests with the virtual environment
 
 # Colors for better readability
@@ -22,7 +23,7 @@ source venv/bin/activate
 echo -e "${YELLOW}Checking required packages...${NC}"
 missing_packages=false
 
-for package in flask flask-cors cryptography numpy; do
+for package in flask flask-cors flask-limiter cryptography numpy; do
     if ! pip show $package &>/dev/null; then
         echo -e "${RED}Error: Package '$package' is not installed.${NC}"
         missing_packages=true
@@ -53,7 +54,7 @@ fi
 # Run tests
 echo -e "${YELLOW}Running tests...${NC}"
 
-if [ "$1" == "-v" ]; then
+if [ "${1:-}" == "-v" ]; then
     ./tests.py -v
     TEST_EXIT_CODE=$?
 else

@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 import unittest
-import sys
 import os
 import json
 import random
 import string
-import numpy as np
 
 # Import the CircuitEncryption class and other functions from app.py
 from app import CircuitEncryption, analyze_circuit, generate_encryption_algorithm, create_encryption_from_analysis

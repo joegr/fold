@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # Simple script to test circuit encryption algorithms using Python 3.11
 
 # Colors for better output
@@ -28,7 +29,7 @@ source venv311/bin/activate
 
 # Install required packages
 echo -e "${YELLOW}Installing required packages...${NC}"
-pip install flask flask-cors cryptography numpy
+pip install flask flask-cors flask-limiter cryptography numpy
 
 # Make tests.py executable
 chmod +x tests.py
@@ -37,7 +38,7 @@ chmod +x tests.py
 echo -e "${YELLOW}Running tests...${NC}"
 
 # Capture test output
-if [ "$1" == "-v" ]; then
+if [ "${1:-}" == "-v" ]; then
     # Verbose mode
     ./tests.py -v
     EXIT_CODE=$?

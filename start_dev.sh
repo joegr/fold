@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # Development startup script for Circuit Card Simulator
 
 # Colors for better readability
@@ -12,11 +13,11 @@ echo -e "${YELLOW}Starting Circuit Card Simulator in development mode...${NC}"
 source venv311/bin/activate
 
 # Check if we should start both frontend and backend or just one
-if [ "$1" == "frontend" ]; then
+if [ "${1:-}" == "frontend" ]; then
     # Start only frontend
     echo -e "${YELLOW}Starting frontend development server...${NC}"
     npm start
-elif [ "$1" == "backend" ]; then
+elif [ "${1:-}" == "backend" ]; then
     # Start only backend
     echo -e "${YELLOW}Starting backend server...${NC}"
     python app.py
@@ -25,7 +26,7 @@ else
     if [[ "$OSTYPE" == "darwin"* ]]; then
         # macOS - use new terminal tabs
         echo -e "${YELLOW}Starting frontend and backend in separate terminal tabs...${NC}"
-        osascript -e 'tell application "Terminal" to do script "cd '$PWD' && npm start"'
+        osascript -e 'tell application "Terminal" to do script "cd '"'"'"$PWD"'"'"' && npm start"'
         echo -e "${GREEN}Frontend server starting in a new terminal tab.${NC}"
         echo -e "${YELLOW}Starting backend server in this terminal...${NC}"
         python app.py
