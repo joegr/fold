@@ -3,6 +3,7 @@ from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from functools import wraps
+import math
 import os
 import json
 import logging
@@ -12,6 +13,7 @@ from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.backends import default_backend
 import base64
 import hashlib
+import hmac
 import time
 import inspect
 
@@ -25,6 +27,7 @@ API_KEY = os.environ.get('API_KEY', None)
 MAX_CARDS = int(os.environ.get('MAX_CARDS', '20'))
 MAX_NODES_PER_CARD = int(os.environ.get('MAX_NODES_PER_CARD', '16'))
 MAX_REQUEST_SIZE = int(os.environ.get('MAX_REQUEST_SIZE', str(1 * 1024 * 1024)))  # 1 MB
+MAX_HISTORY_RECORDS = int(os.environ.get('MAX_HISTORY_RECORDS', '200'))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,6 +40,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 app = Flask(__name__, static_folder='build')
 app.config['MAX_CONTENT_LENGTH'] = MAX_REQUEST_SIZE
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
 limiter = Limiter(get_remote_address, app=app, default_limits=["60 per minute"])
 encryption_records = []
@@ -57,11 +61,22 @@ def require_api_key(f):
     def decorated(*args, **kwargs):
         if API_KEY is None:
             return f(*args, **kwargs)
-        key = request.headers.get('X-API-Key')
-        if not key or key != API_KEY:
+        key = request.headers.get('X-API-Key', '')
+        if not hmac.compare_digest(key, API_KEY):
             return jsonify({'error': 'Unauthorized'}), 401
         return f(*args, **kwargs)
     return decorated
+
+
+def _safe_float(val, default=0.0):
+    """Convert to float, rejecting inf/nan and non-numeric values."""
+    try:
+        f = float(val)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(f):
+        return default
+    return f
 
 
 def validate_circuit_data(data):
@@ -85,11 +100,20 @@ def validate_circuit_data(data):
 
         color = str(card.get('color', 'gray'))[:20]
 
-        # Sanitize nodes
+        # Sanitize nodes — deep validate each node
         raw_nodes = card.get('nodes', [])
         if not isinstance(raw_nodes, list):
             raw_nodes = []
-        nodes = raw_nodes[:MAX_NODES_PER_CARD]
+        nodes = []
+        for node in raw_nodes[:MAX_NODES_PER_CARD]:
+            if isinstance(node, dict):
+                nodes.append({
+                    'id': str(node.get('id', ''))[:64],
+                    'x': _safe_float(node.get('x', 0)),
+                    'y': _safe_float(node.get('y', 0)),
+                    'type': str(node.get('type', 'input'))[:20],
+                    'connections': [str(c)[:64] for c in node.get('connections', [])[:16] if isinstance(c, str)],
+                })
 
         # Sanitize matrix connections
         raw_conns = card.get('matrixConnections', [])
@@ -101,10 +125,10 @@ def validate_circuit_data(data):
                 connections.append({
                     'id': str(conn.get('id', ''))[:64],
                     'active': True,
-                    'fromX': float(conn.get('fromX', 0)),
-                    'fromY': float(conn.get('fromY', 0)),
-                    'toX': float(conn.get('toX', 0)),
-                    'toY': float(conn.get('toY', 0)),
+                    'fromX': _safe_float(conn.get('fromX', 0)),
+                    'fromY': _safe_float(conn.get('fromY', 0)),
+                    'toX': _safe_float(conn.get('toX', 0)),
+                    'toY': _safe_float(conn.get('toY', 0)),
                 })
 
         # Sanitize mesh interaction points
@@ -116,8 +140,8 @@ def validate_circuit_data(data):
             if isinstance(pt, dict):
                 mesh_points.append({
                     'id': str(pt.get('id', ''))[:64],
-                    'x': float(pt.get('x', 0)),
-                    'y': float(pt.get('y', 0)),
+                    'x': _safe_float(pt.get('x', 0)),
+                    'y': _safe_float(pt.get('y', 0)),
                     'upConnections': [str(c)[:64] for c in pt.get('upConnections', [])[:16] if isinstance(c, str)],
                     'downConnections': [str(c)[:64] for c in pt.get('downConnections', [])[:16] if isinstance(c, str)],
                 })
@@ -135,8 +159,8 @@ def validate_circuit_data(data):
                 logic_gates.append({
                     'id': str(gate.get('id', ''))[:64],
                     'type': gate_type,
-                    'x': float(gate.get('x', 0)),
-                    'y': float(gate.get('y', 0)),
+                    'x': _safe_float(gate.get('x', 0)),
+                    'y': _safe_float(gate.get('y', 0)),
                 })
 
         cleaned_cards.append({
@@ -184,9 +208,13 @@ class CircuitEncryption:
         ]
         
         # Override with provided values if any
+        _ALLOWED_CONSTANT_KEYS = frozenset({
+            'KEY_ROUNDS', 'MATRIX_SIZE', 'PERMUTATION_ROUNDS', 'CIRCUIT_SEED',
+        })
         if key_derivation_constants:
             for key, value in key_derivation_constants.items():
-                setattr(self, key, value)
+                if key in _ALLOWED_CONSTANT_KEYS:
+                    setattr(self, key, value)
                 
         if connection_matrix is not None:
             self.connection_matrix = connection_matrix
@@ -640,12 +668,16 @@ def api_generate_encryption():
         analysis = analyze_circuit(cleaned)
         algorithm = generate_encryption_algorithm(analysis)
 
-        encryption_records.append({
+        record = {
             'timestamp': time.time(),
             'cards_count': len(cleaned.get('cards', [])),
             'complexity': analysis['summary']['complexity_score'],
             'algorithm_size': len(algorithm),
-        })
+        }
+        encryption_records.append(record)
+        # Prevent unbounded memory growth
+        while len(encryption_records) > MAX_HISTORY_RECORDS:
+            encryption_records.pop(0)
 
         return jsonify({
             'algorithm': algorithm,

@@ -38,11 +38,17 @@ const App: React.FC = () => {
     
     setIsLoading(true);
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      const apiKey = (window as any).__FOLD_API_KEY || process.env.REACT_APP_API_KEY;
+      if (apiKey) {
+        headers['X-API-Key'] = apiKey;
+      }
+
       const response = await fetch('/api/generate_encryption', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers,
         body: JSON.stringify({ 
           cards: stackedCards,
           timestamp: new Date().toISOString()
