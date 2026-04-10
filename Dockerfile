@@ -1,3 +1,14 @@
+# ── Stage 1: Build React frontend ────────────────────────────────
+FROM node:18-slim AS frontend
+WORKDIR /build
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY public/ public/
+COPY src/ src/
+COPY tsconfig.json ./
+RUN npm run build
+
+# ── Stage 2: Python base ────────────────────────────────────────
 FROM python:3.11-slim AS base
 
 # Create non-root user
@@ -11,6 +22,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY app.py tests.py ./
+
+# Copy frontend build from stage 1
+COPY --from=frontend /build/build ./build/
 
 # Switch to non-root user
 RUN chown -R appuser:appuser /app

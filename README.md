@@ -24,8 +24,9 @@ custom encryption algorithm that wraps AES-256-CBC.
 8. [API Reference](#api-reference)
 9. [Configuration](#configuration)
 10. [Project Structure](#project-structure)
-11. [Security](#security)
-12. [License](#license)
+11. [CI / CD](#ci--cd)
+12. [Security](#security)
+13. [License](#license)
 
 ---
 
@@ -346,6 +347,50 @@ fold/
         ├── CardLibrary.tsx     # Clickable card grid
         └── CardGenerator.tsx   # Form for building custom cards
 ```
+
+---
+
+## CI / CD
+
+GitHub Actions (`.github/workflows/ci.yml`) runs automatically on every push and PR
+to `main`.
+
+### Pipeline
+
+```
+PR / push → test job ─────────────────────────→ ✅ / ❌
+                │
+          (main only)
+                ↓
+         build-and-push job
+                ├─ Build production image
+                ├─ Smoke-test (API + frontend)
+                └─ Push to ghcr.io
+```
+
+| Job              | Trigger            | What it does                                          |
+| ---------------- | ------------------ | ----------------------------------------------------- |
+| `test`           | Every push & PR    | Builds test image, runs 8 unit tests                  |
+| `build-and-push` | Push to `main` only| Builds prod image, smoke-tests, pushes to GHCR        |
+
+### Pulling the image
+
+```bash
+# Latest from main
+docker pull ghcr.io/joegr/fold:latest
+
+# Specific commit
+docker pull ghcr.io/joegr/fold:sha-<commit>
+
+# Run it
+docker run -p 5000:5000 --env-file .env ghcr.io/joegr/fold:latest
+```
+
+### Required setup
+
+No additional secrets needed — `GITHUB_TOKEN` is provided automatically by Actions
+and has `packages:write` permission set in the workflow. The image is published to
+the repo's GitHub Packages.
 
 ---
 

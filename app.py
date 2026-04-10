@@ -710,6 +710,11 @@ def api_history():
 @app.route('/<path:path>')
 def serve(path):
     """Serve the React frontend"""
+    if app.static_folder is None or not os.path.isdir(app.static_folder):
+        return jsonify({
+            'error': 'Frontend not built. Run: npm install && npm run build',
+            'api': '/api/status',
+        }), 503
     if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
         return send_from_directory(app.static_folder, path)
     return send_from_directory(app.static_folder, 'index.html')
