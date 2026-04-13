@@ -15,6 +15,8 @@ import hashlib
 import hmac
 import time
 import inspect
+import urllib.request
+import urllib.error
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -27,6 +29,7 @@ MAX_CARDS = int(os.environ.get('MAX_CARDS', '20'))
 MAX_NODES_PER_CARD = int(os.environ.get('MAX_NODES_PER_CARD', '16'))
 MAX_REQUEST_SIZE = int(os.environ.get('MAX_REQUEST_SIZE', str(1 * 1024 * 1024)))  # 1 MB
 MAX_HISTORY_RECORDS = int(os.environ.get('MAX_HISTORY_RECORDS', '200'))
+PQC_SERVICE_URL = os.environ.get('PQC_SERVICE_URL', 'http://localhost:5001')
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +51,7 @@ ALLOWED_GATE_TYPES = frozenset({'AND', 'OR', 'XOR', 'NOT', 'NAND', 'NOR', 'BUFFE
 ALLOWED_CARD_TYPES = frozenset({
     'processor', 'memory', 'io', 'custom', 'network',
     'logic', 'matrix', 'hybrid', 'basic',
+    'lattice', 'code_based', 'hash_based',
 })
 
 
@@ -723,11 +727,97 @@ def serve(path):
 @app.route('/api/status')
 def api_status():
     """API status check endpoint"""
+    # Check PQC sidecar availability
+    pqc_status = 'unavailable'
+    try:
+        req = urllib.request.Request(f'{PQC_SERVICE_URL}/pqc/status', method='GET')
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            if resp.status == 200:
+                pqc_status = 'online'
+    except Exception:
+        pass
+
     return jsonify({
         'status': 'online',
-        'version': '1.1.0',
-        'endpoints': ['/api/generate_encryption', '/api/history', '/api/status'],
+        'version': '2.0.0',
+        'pqc_status': pqc_status,
+        'pqc_algorithm': 'ML-KEM-768',
+        'endpoints': [
+            '/api/generate_encryption',
+            '/api/history',
+            '/api/status',
+            '/api/pqc/keypair',
+            '/api/pqc/encrypt',
+            '/api/pqc/decrypt',
+            '/api/pqc/status',
+        ],
     })
+
+
+# ---------------------------------------------------------------------------
+# PQC proxy — forwards /api/pqc/* to the PQC sidecar service
+# ---------------------------------------------------------------------------
+def _proxy_to_pqc(path: str):
+    """Forward a JSON request to the PQC sidecar and relay the response."""
+    target_url = f'{PQC_SERVICE_URL}/pqc/{path}'
+    try:
+        body = request.get_data()
+        headers = {'Content-Type': 'application/json'}
+        if request.headers.get('X-API-Key'):
+            headers['X-API-Key'] = request.headers['X-API-Key']
+        req = urllib.request.Request(
+            target_url,
+            data=body if request.method == 'POST' else None,
+            headers=headers,
+            method=request.method,
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            resp_body = resp.read()
+            return app.response_class(
+                response=resp_body,
+                status=resp.status,
+                mimetype='application/json',
+            )
+    except urllib.error.HTTPError as e:
+        resp_body = e.read()
+        return app.response_class(
+            response=resp_body,
+            status=e.code,
+            mimetype='application/json',
+        )
+    except Exception:
+        logger.exception('PQC proxy error for %s', path)
+        return jsonify({'error': 'PQC service unavailable'}), 503
+
+
+@app.route('/api/pqc/status')
+def api_pqc_status():
+    """Health check for the PQC sidecar."""
+    return _proxy_to_pqc('status')
+
+
+@app.route('/api/pqc/keypair', methods=['POST'])
+@require_api_key
+@limiter.limit("10 per minute")
+def api_pqc_keypair():
+    """Generate ML-KEM-768 keypair via PQC sidecar."""
+    return _proxy_to_pqc('keypair')
+
+
+@app.route('/api/pqc/encrypt', methods=['POST'])
+@require_api_key
+@limiter.limit("10 per minute")
+def api_pqc_encrypt():
+    """PQ encrypt via PQC sidecar."""
+    return _proxy_to_pqc('encrypt')
+
+
+@app.route('/api/pqc/decrypt', methods=['POST'])
+@require_api_key
+@limiter.limit("10 per minute")
+def api_pqc_decrypt():
+    """PQ decrypt via PQC sidecar."""
+    return _proxy_to_pqc('decrypt')
 
 
 if __name__ == '__main__':

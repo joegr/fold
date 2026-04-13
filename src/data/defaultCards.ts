@@ -112,10 +112,69 @@ const meshInteractionCard: CircuitCard = {
   ]
 };
 
+// Define a lattice-based card for post-quantum encryption (ML-KEM-768)
+const latticeCard: CircuitCard = {
+  id: 'lattice-kem',
+  name: 'Lattice Card (PQ)',
+  description: 'Post-quantum ML-KEM-768 lattice key encapsulation',
+  color: '#e44a8d',
+  type: 'lattice',
+  height: 0.3,
+  nodes: [
+    { id: 'pk-in', x: 0.1, y: 0.2, type: 'input', connections: ['kem-gate'] },
+    { id: 'sk-in', x: 0.1, y: 0.5, type: 'input', connections: ['kem-gate'] },
+    { id: 'noise-in', x: 0.1, y: 0.8, type: 'input', connections: ['kem-gate'] },
+    { id: 'ct-out', x: 0.9, y: 0.3, type: 'output', connections: ['kem-gate'] },
+    { id: 'ss-out', x: 0.9, y: 0.7, type: 'output', connections: ['kem-gate'] },
+  ],
+  logicGates: [
+    { id: 'kem-gate', type: 'XOR', inputs: ['pk-in', 'sk-in', 'noise-in'], outputs: ['ct-out', 'ss-out'], x: 0.5, y: 0.5 },
+  ],
+  matrixConnections: [
+    { fromX: 0.1, fromY: 0.2, toX: 0.9, toY: 0.3, active: true },
+    { fromX: 0.1, fromY: 0.5, toX: 0.9, toY: 0.7, active: true },
+    { fromX: 0.1, fromY: 0.8, toX: 0.5, toY: 0.5, active: true },
+  ],
+  meshInteractionPoints: [
+    { id: 'lm1', x: 0.3, y: 0.3, upConnections: [], downConnections: [] },
+    { id: 'lm2', x: 0.3, y: 0.7, upConnections: [], downConnections: [] },
+    { id: 'lm3', x: 0.7, y: 0.3, upConnections: ['lm1'], downConnections: [] },
+    { id: 'lm4', x: 0.7, y: 0.7, upConnections: ['lm2'], downConnections: [] },
+  ],
+};
+
+// Define a hash-based card for post-quantum signatures
+const hashBasedCard: CircuitCard = {
+  id: 'hash-sig',
+  name: 'Hash Card (PQ)',
+  description: 'Post-quantum hash-based signature layer (SHAKE-256)',
+  color: '#4ae4c1',
+  type: 'hash_based',
+  height: 0.15,
+  nodes: [
+    { id: 'msg-in', x: 0.1, y: 0.3, type: 'input', connections: [] },
+    { id: 'key-in', x: 0.1, y: 0.7, type: 'input', connections: [] },
+    { id: 'hash-out', x: 0.9, y: 0.5, type: 'output', connections: [] },
+  ],
+  logicGates: [
+    { id: 'hash-gate', type: 'NAND', inputs: ['msg-in', 'key-in'], outputs: ['hash-out'], x: 0.5, y: 0.5 },
+  ],
+  matrixConnections: [
+    { fromX: 0.1, fromY: 0.3, toX: 0.9, toY: 0.5, active: true },
+    { fromX: 0.1, fromY: 0.7, toX: 0.9, toY: 0.5, active: true },
+  ],
+  meshInteractionPoints: [
+    { id: 'hm1', x: 0.5, y: 0.3, upConnections: [], downConnections: [] },
+    { id: 'hm2', x: 0.5, y: 0.7, upConnections: [], downConnections: [] },
+  ],
+};
+
 // Export all default cards
 export const defaultCards: CircuitCard[] = [
   andGateCard,
   matrixCard,
   hybridCard,
-  meshInteractionCard
+  meshInteractionCard,
+  latticeCard,
+  hashBasedCard,
 ]; 

@@ -43,6 +43,12 @@ custom encryption algorithm that wraps AES-256-CBC.
   Python encryption class derived from your circuit layout.
 - **Encrypt / decrypt round-trip** — every generated algorithm supports
   `encrypt(plaintext, key)` → `decrypt(ciphertext, key)` backed by AES-256-CBC.
+- **Post-quantum mode** — toggle PQ mode to generate ML-KEM-768 keypairs
+  (NIST FIPS 203) bound to the circuit topology, with AES-256-GCM symmetric
+  encryption and SHAKE-256 circuit binding.
+- **PQC sidecar** — a dedicated Docker service running on the
+  [Open Quantum Safe](https://openquantumsafe.org/) stack (liboqs) provides
+  key encapsulation, encrypt, and decrypt endpoints.
 
 ---
 
@@ -51,19 +57,32 @@ custom encryption algorithm that wraps AES-256-CBC.
 ```
 ┌──────────────────────────────────────────────────────┐
 │  React + TypeScript + Three.js  (src/)               │
-│  └─ CardGenerator, CardLibrary, CircuitCanvas        │
+│  ├─ CardGenerator, CardLibrary, CircuitCanvas        │
+│  └─ PQ mode toggle → /api/pqc/* proxy               │
 ├──────────────────────────────────────────────────────┤
-│  Flask REST API  (app.py)                            │
+│  Flask REST API  (app.py)   :5000                    │
 │  ├─ Input validation & sanitization                  │
 │  ├─ Circuit analysis (analyze_circuit)               │
 │  ├─ Code generation (generate_encryption_algorithm)  │
 │  ├─ Safe factory  (create_encryption_from_analysis)  │
-│  └─ CircuitEncryption class (encrypt / decrypt)      │
+│  ├─ CircuitEncryption class (encrypt / decrypt)      │
+│  └─ /api/pqc/* proxy → PQC sidecar                  │
 ├──────────────────────────────────────────────────────┤
-│  Cryptography layer                                  │
+│  PQC Sidecar  (pqc/server.py)   :5001                │
+│  ├─ ML-KEM-768 keypair generation (NIST FIPS 203)   │
+│  ├─ Key encapsulation / decapsulation (liboqs)       │
+│  ├─ Circuit-topology binding via SHAKE-256           │
+│  └─ AES-256-GCM authenticated encryption             │
+├──────────────────────────────────────────────────────┤
+│  Classical cryptography layer                        │
 │  ├─ SHA-256 key derivation with circuit matrix       │
 │  ├─ Reversible substitution + XOR diffusion + perm.  │
 │  └─ AES-256-CBC (via pyca/cryptography)              │
+├──────────────────────────────────────────────────────┤
+│  Post-quantum cryptography layer                     │
+│  ├─ ML-KEM-768 (CRYSTALS-Kyber) key encapsulation   │
+│  ├─ SHAKE-256 circuit binding (topology → AES key)   │
+│  └─ AES-256-GCM with circuit AAD                     │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -117,12 +136,19 @@ so the entire team uses the same environment.
 
 ```bash
 make build          # build all images (no cache)
-make test           # run unit tests in Docker
-make up             # start production server (gunicorn, detached)
-make dev            # start Flask dev server with FLASK_DEBUG=1
-make logs           # tail production logs
+make test           # run classical unit tests in Docker
+make up             # start production server + PQC sidecar (detached)
+make dev            # start Flask dev + PQC with hot-reload
+make logs           # tail production + PQC logs
 make down           # stop everything
 make clean          # remove containers, images, volumes
+
+# Post-quantum targets
+make pqc-build      # build PQC image only (liboqs, ~3 min first time)
+make pqc-up         # start PQC sidecar only on :5001
+make pqc-test       # run PQC pytest suite in Docker
+make pqc-logs       # tail PQC server logs
+make test-all       # run classical + PQC tests
 ```
 
 `make` auto-creates `.env` from `.env.example` if it doesn't exist.
@@ -130,9 +156,10 @@ make clean          # remove containers, images, volumes
 ### Using Docker Compose directly
 
 ```bash
-docker compose up app --build -d       # production (gunicorn)
-docker compose run --rm test           # tests
-docker compose up dev --build          # dev server
+docker compose up app pqc --build -d   # production + PQC (gunicorn)
+docker compose run --rm test           # classical tests
+docker compose run --rm pqc-test       # PQC tests
+docker compose up dev --build          # dev server + PQC
 docker compose down                    # stop
 ```
 
@@ -209,6 +236,10 @@ environment and pass the key via the `X-API-Key` request header.
 | POST   | `/api/generate_encryption` | optional | 10 req / min | Generate encryption from cards     |
 | GET    | `/api/history`             | optional | 60 req / min | Retrieve generation history        |
 | GET    | `/api/status`              | none     | 60 req / min | Health-check / version info        |
+| POST   | `/api/pqc/keypair`         | optional | 10 req / min | Generate ML-KEM-768 keypair        |
+| POST   | `/api/pqc/encrypt`         | optional | 10 req / min | PQ encrypt (KEM + AES-256-GCM)     |
+| POST   | `/api/pqc/decrypt`         | optional | 10 req / min | PQ decrypt (KEM + AES-256-GCM)     |
+| GET    | `/api/pqc/status`          | none     | 60 req / min | PQC sidecar health-check           |
 
 ### POST `/api/generate_encryption`
 
@@ -309,21 +340,21 @@ backend (see [Flask-Limiter docs](https://flask-limiter.readthedocs.io)).
 
 ```
 fold/
-├── app.py                  # Flask backend — API, crypto engine, code generation
+├── app.py                  # Flask backend — API, crypto engine, PQC proxy
 ├── tests.py                # 8 unit tests for encryption round-trips
 ├── requirements.txt        # Python dependencies (pinned)
 ├── package.json            # Node.js dependencies (React, Three.js, TypeScript)
 ├── tsconfig.json           # TypeScript compiler config
 │
 ├── Dockerfile              # Multi-stage: base → test / production (gunicorn)
-├── docker-compose.yml      # Services: app (prod), test, dev
-├── Makefile                # Docker-first task runner (make test, make up, etc.)
+├── docker-compose.yml      # Services: app, pqc, test, pqc-test, dev
+├── Makefile                # Docker-first task runner (make test, make pqc-test, etc.)
 ├── .dockerignore           # Keeps Docker context lean
 ├── .github/
 │   └── workflows/
 │       └── ci.yml          # GitHub Actions: build + test + smoke-test
 │
-├── .env.example            # Environment variable template
+├── .env.example            # Environment variable template (incl. PQC vars)
 ├── .gitignore              # Git exclusions (venv, node_modules, .env, build)
 ├── build.sh                # Full build: npm install + build + pip install
 ├── setup.sh                # Dependency install only
@@ -332,20 +363,30 @@ fold/
 ├── run_tests.sh            # Run tests inside virtualenv
 ├── test_circuit.sh         # Run tests with Python 3.11 specifically
 │
+├── pqc/                    # Post-quantum cryptography sidecar
+│   ├── Dockerfile          # OQS base image (liboqs + Python)
+│   ├── docker-compose.yml  # Standalone compose (also wired into root)
+│   ├── Makefile            # PQC-specific make targets
+│   ├── requirements.txt    # PQC Python deps
+│   ├── lattice.py          # ML-KEM-768 + SHAKE-256 circuit binding
+│   ├── server.py           # Flask REST API for PQ encrypt/decrypt
+│   └── tests/
+│       └── test_lattice.py # 12 pytest tests for PQ crypto pipeline
+│
 ├── public/
 │   └── index.html          # HTML shell for React app
 └── src/
-    ├── App.tsx             # Root component — stack management, API calls
+    ├── App.tsx             # Root component — stack management, PQ toggle
     ├── index.tsx           # React DOM entry point
     ├── index.css           # Global styles (dark theme)
     ├── types/
-    │   └── CircuitTypes.ts # TypeScript interfaces (CircuitCard, LogicGate, etc.)
+    │   └── CircuitTypes.ts # TypeScript interfaces (incl. PQ card types)
     ├── data/
-    │   └── defaultCards.ts # Pre-built card library (AND, matrix, hybrid, mesh)
+    │   └── defaultCards.ts # Pre-built card library (incl. lattice, hash PQ cards)
     └── components/
         ├── CircuitCanvas.tsx   # Three.js 3D scene with OrbitControls
         ├── CardLibrary.tsx     # Clickable card grid
-        └── CardGenerator.tsx   # Form for building custom cards
+        └── CardGenerator.tsx   # Form for building custom cards (incl. PQ types)
 ```
 
 ---
@@ -422,7 +463,7 @@ the repo's GitHub Packages.
 - **Ciphertext validation** — `decrypt()` rejects inputs shorter than IV + one
   AES block.
 
-### Encryption internals
+### Classical encryption internals
 
 The `CircuitEncryption` class implements a layered scheme:
 
@@ -436,6 +477,26 @@ The `CircuitEncryption` class implements a layered scheme:
 
 Decryption runs the inverse: base64-decode → extract IV → AES-CBC decrypt → reverse
 transform → unpad.
+
+### Post-quantum encryption internals
+
+The `PostQuantumCircuitEncryption` class (`pqc/lattice.py`) implements a
+quantum-resistant pipeline using NIST-standardized algorithms:
+
+1. **Circuit → lattice parameter derivation** — SHAKE-256 hashes the circuit
+   topology (card types, colors, gates, connections) to produce a deterministic
+   seed, noise vector, and binding vector.
+2. **ML-KEM-768 key encapsulation** (NIST FIPS 203 / CRYSTALS-Kyber) —
+   generates a public/secret keypair. The sender encapsulates a shared secret
+   using the public key; the recipient decapsulates with the secret key.
+3. **Circuit binding** — the ML-KEM shared secret is mixed with the
+   circuit-specific binding vector and gate modifier via SHAKE-256, producing
+   a 32-byte AES key unique to that (circuit, keypair) pair.
+4. **AES-256-GCM** — authenticated encryption with the circuit binding vector
+   as Additional Authenticated Data (AAD). A random 12-byte nonce is prepended.
+
+Different circuit topologies produce different AES keys even from the same ML-KEM
+keypair, and tampering with the topology causes GCM authentication to fail.
 
 ---
 
