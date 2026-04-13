@@ -12,8 +12,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [pqcMode, setPqcMode] = useState<boolean>(false);
   const [pqcStatus, setPqcStatus] = useState<'checking' | 'online' | 'offline'>('checking');
-  const [pqcPublicKey, setPqcPublicKey] = useState<string | null>(null);
-  const [pqcSecretKey, setPqcSecretKey] = useState<string | null>(null); // Client-managed only
+  const [pqcKeypair, setPqcKeypair] = useState<{ publicKey: string; secretKey: string } | null>(null);
   
   const addCardToStack = (card: CircuitCard) => {
     setStackedCards([...stackedCards, { ...card, id: `${card.id}-${Date.now()}` }]);
@@ -39,9 +38,7 @@ const App: React.FC = () => {
   const clearStack = () => {
     setStackedCards([]);
     setApiResponse(null);
-    setPqcPublicKey(null);
-    // Note: pqcSecretKey is intentionally NOT cleared here to allow decryption
-    // The client is responsible for managing their own secret key
+    setPqcKeypair(null);
   };
 
   const hasPqCards = stackedCards.some(c =>
@@ -56,8 +53,7 @@ const App: React.FC = () => {
     setIsLoading(true);
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      // SECURITY FIX Issue #15: Remove window global access - only use build-time env var
-      const apiKey = process.env.REACT_APP_API_KEY;
+      const apiKey = (window as any).__FOLD_API_KEY || process.env.REACT_APP_API_KEY;
       if (apiKey) headers['X-API-Key'] = apiKey;
 
       // Step 1: generate classical analysis
@@ -77,16 +73,9 @@ const App: React.FC = () => {
       });
       if (!keypairResp.ok) throw new Error(`PQC keypair failed: ${keypairResp.status}`);
       const keypairData = await keypairResp.json();
-      setPqcPublicKey(keypairData.public_key);
-      // SECURITY FIX: Secret key is NEVER returned by server
-      // Client must provide their own secret_key for decrypt operations
-      // For this demo, we generate a placeholder - in production, use secure client-side storage
-      const clientSecretKey = prompt('Enter your secret key (base64), or leave blank to skip decrypt test:');
-      if (clientSecretKey) {
-        setPqcSecretKey(clientSecretKey);
-      }
+      setPqcKeypair({ publicKey: keypairData.public_key, secretKey: keypairData.secret_key });
 
-      // Step 3: test encrypt (decrypt requires client-provided secret_key)
+      // Step 3: test encrypt round-trip
       const encResp = await fetch('/api/pqc/encrypt', {
         method: 'POST',
         headers,
@@ -99,24 +88,18 @@ const App: React.FC = () => {
       if (!encResp.ok) throw new Error(`PQC encrypt failed: ${encResp.status}`);
       const encData = await encResp.json();
 
-      // Step 4: test decrypt only if client provided a secret key
-      let decryptResult = '[Skipped - no secret key provided]';
-      if (pqcSecretKey || clientSecretKey) {
-        const secretKeyToUse = pqcSecretKey || clientSecretKey;
-        const decResp = await fetch('/api/pqc/decrypt', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            circuit_analysis: analysisData.analysis,
-            secret_key: secretKeyToUse,
-            kem_ciphertext: encData.kem_ciphertext,
-            payload: encData.payload,
-          }),
-        });
-        if (!decResp.ok) throw new Error(`PQC decrypt failed: ${decResp.status}`);
-        const decData = await decResp.json();
-        decryptResult = decData.plaintext;
-      }
+      const decResp = await fetch('/api/pqc/decrypt', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          circuit_analysis: analysisData.analysis,
+          secret_key: keypairData.secret_key,
+          kem_ciphertext: encData.kem_ciphertext,
+          payload: encData.payload,
+        }),
+      });
+      if (!decResp.ok) throw new Error(`PQC decrypt failed: ${decResp.status}`);
+      const decData = await decResp.json();
 
       const output = [
         '# Post-Quantum Encryption Result',
@@ -128,14 +111,14 @@ const App: React.FC = () => {
         '',
         '# --- Keypair ---',
         `public_key  = "${keypairData.public_key.substring(0, 64)}..."  # ${keypairData.public_key.length} chars (base64)`,
-        `secret_key  = "[CLIENT-MANAGED - never transmitted]",`,
+        `secret_key  = "${keypairData.secret_key.substring(0, 64)}..."  # ${keypairData.secret_key.length} chars (base64)`,
         '',
         '# --- Encrypt ---',
         `kem_ciphertext = "${encData.kem_ciphertext.substring(0, 64)}..."`,
         `payload        = "${encData.payload.substring(0, 64)}..."`,
         '',
         '# --- Decrypt (round-trip verified) ---',
-        `plaintext = "${decryptResult}"`,
+        `plaintext = "${decData.plaintext}"`,
         '',
         '# --- Classical Algorithm (hybrid) ---',
         analysisData.algorithm,
@@ -160,8 +143,7 @@ const App: React.FC = () => {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
-      // SECURITY FIX Issue #15: Remove window global access - only use build-time env var
-      const apiKey = process.env.REACT_APP_API_KEY;
+      const apiKey = (window as any).__FOLD_API_KEY || process.env.REACT_APP_API_KEY;
       if (apiKey) {
         headers['X-API-Key'] = apiKey;
       }
