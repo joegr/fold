@@ -1,0 +1,21 @@
+services:
+  pqc:
+    build:
+      context: .
+      target: production
+    ports:
+      - "${PQC_PORT:-5001}:5001"
+    environment:
+      - PQC_PORT=5001
+      - FLASK_DEBUG=0
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  test:
+    build:
+      context: .
+      target: test
+    profiles:
+      - test

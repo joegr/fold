@@ -2,9 +2,13 @@
 # Circuit Card Simulator – Docker Compose
 #
 # Usage:
-#   docker compose up              # start production server
-#   docker compose run --rm test   # run unit tests
-#   docker compose up dev          # start Flask dev server
+#   docker compose up              # start production server + PQC
+#   docker compose run --rm test   # run classical unit tests
+#   docker compose up dev          # start Flask dev server + PQC
+#
+# Post-Quantum:
+#   docker compose run --rm pqc-test   # run PQC pytest suite
+#   docker compose up pqc              # PQC service only
 # ─────────────────────────────────────────────────────────────
 
 services:
@@ -17,6 +21,11 @@ services:
       - "${PORT:-5000}:5000"
     env_file:
       - .env
+    environment:
+      - PQC_SERVICE_URL=http://pqc:5001
+    depends_on:
+      pqc:
+        condition: service_started
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -24,7 +33,35 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  # ── Test runner ───────────────────────────────────────────
+  # ── Post-Quantum Cryptography service (ML-KEM-768) ───────
+  pqc:
+    build:
+      context: ./pqc
+      target: production
+    # SECURITY FIX Issue #9: No host port binding - internal Docker network only
+    # Only accessible via main app proxy, not directly from host network
+    # ports:
+    #   - "${PQC_PORT:-5001}:5001"
+    expose:
+      - "5001"  # Only exposed to other containers, not host
+    environment:
+      - PQC_PORT=5001
+      - FLASK_DEBUG=0
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5000}
+      - API_KEY=${API_KEY}  # SECURITY: Required API key
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/pqc/status')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── Test runner (classical) ──────────────────────────────
   test:
     build:
       context: .
@@ -33,6 +70,14 @@ services:
       - test
     env_file:
       - .env
+
+  # ── Test runner (post-quantum) ───────────────────────────
+  pqc-test:
+    build:
+      context: ./pqc
+      target: test
+    profiles:
+      - test
 
   # ── Dev server (Flask debug mode) ────────────────────────
   dev:
@@ -45,6 +90,10 @@ services:
       - .env
     environment:
       - FLASK_DEBUG=1
+      - PQC_SERVICE_URL=http://pqc:5001
     command: ["python", "app.py"]
+    depends_on:
+      pqc:
+        condition: service_started
     profiles:
       - dev
