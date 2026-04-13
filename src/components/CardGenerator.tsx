@@ -8,7 +8,7 @@ interface CardGeneratorProps {
 const CardGenerator: React.FC<CardGeneratorProps> = ({ addCardToLibrary }) => {
   const [name, setName] = useState('Custom Card');
   const [description, setDescription] = useState('User generated card');
-  const [cardType, setCardType] = useState<'logic' | 'matrix' | 'hybrid'>('matrix');
+  const [cardType, setCardType] = useState<'logic' | 'matrix' | 'hybrid' | 'lattice' | 'code_based' | 'hash_based'>('matrix');
   const [color, setColor] = useState('#5a6bff');
   const [height, setHeight] = useState(0.2);
   
@@ -241,7 +241,7 @@ const CardGenerator: React.FC<CardGeneratorProps> = ({ addCardToLibrary }) => {
                 Card Type:
                 <select 
                   value={cardType} 
-                  onChange={(e) => setCardType(e.target.value as 'logic' | 'matrix' | 'hybrid')}
+                  onChange={(e) => setCardType(e.target.value as 'logic' | 'matrix' | 'hybrid' | 'lattice' | 'code_based' | 'hash_based')}
                   style={{
                     width: '100%',
                     padding: '8px',
@@ -254,6 +254,9 @@ const CardGenerator: React.FC<CardGeneratorProps> = ({ addCardToLibrary }) => {
                   <option value="logic">Logic</option>
                   <option value="matrix">Matrix</option>
                   <option value="hybrid">Hybrid</option>
+                  <option value="lattice">Lattice (PQ)</option>
+                  <option value="code_based">Code-Based (PQ)</option>
+                  <option value="hash_based">Hash-Based (PQ)</option>
                 </select>
               </label>
               

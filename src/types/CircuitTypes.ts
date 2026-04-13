@@ -44,7 +44,7 @@ export interface CircuitCard {
   name: string;
   description: string;
   color: string;
-  type: 'logic' | 'matrix' | 'hybrid';
+  type: 'logic' | 'matrix' | 'hybrid' | 'lattice' | 'code_based' | 'hash_based';
   nodes: CircuitNode[];
   logicGates?: LogicGate[];
   matrixConnections?: MatrixConnection[];

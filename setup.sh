@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # Setup script for the Circuit Card Simulator
 
 echo "Setting up Circuit Card Simulator..."

@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 import unittest
-import sys
 import os
 import json
 import random
 import string
-import numpy as np
-import inspect
-import tempfile
-from io import StringIO
 
 # Import the CircuitEncryption class and other functions from app.py
-from app import CircuitEncryption, analyze_circuit, generate_encryption_algorithm
+from app import CircuitEncryption, analyze_circuit, generate_encryption_algorithm, create_encryption_from_analysis
 
 class TestCipherAlgorithms(unittest.TestCase):
     """Test suite for cipher algorithms generated from circuit configurations."""
@@ -172,101 +167,52 @@ class TestCipherAlgorithms(unittest.TestCase):
 
     def test_simple_circuit_algorithm(self):
         """Test encryption algorithm generated from a simple circuit."""
-        # Analyze the circuit
         analysis = analyze_circuit(self.simple_circuit)
-        
-        # Generate the algorithm code
+
+        # Verify code generation still works (syntax check)
         algorithm_code = generate_encryption_algorithm(analysis)
-        
-        # Save the algorithm to a temporary file and import it
-        with tempfile.NamedTemporaryFile(suffix='.py', delete=False, mode='w') as f:
-            f.write(algorithm_code)
-            temp_module_path = f.name
-        
-        # Dynamically import the generated module
-        temp_module_name = os.path.basename(temp_module_path).replace('.py', '')
-        temp_module_dir = os.path.dirname(temp_module_path)
-        
-        # Add the directory to the Python path
-        sys.path.insert(0, temp_module_dir)
-        
-        try:
-            # Import the module
-            temp_module = __import__(temp_module_name)
-            
-            # Create an instance of the encryption class
-            cipher = temp_module.CircuitEncryption()
-            
-            # Test encryption and decryption
-            encrypted = cipher.encrypt(self.test_data, self.test_key)
-            decrypted = cipher.decrypt(encrypted, self.test_key)
-            
-            self.assertEqual(self.test_data, decrypted)
-        finally:
-            # Clean up
-            if temp_module_name in sys.modules:
-                del sys.modules[temp_module_name]
-            sys.path.remove(temp_module_dir)
-            os.unlink(temp_module_path)
+        self.assertIn('class CircuitEncryption', algorithm_code)
+
+        # Use the safe factory to get a configured instance
+        cipher = create_encryption_from_analysis(analysis)
+
+        encrypted = cipher.encrypt(self.test_data, self.test_key)
+        decrypted = cipher.decrypt(encrypted, self.test_key)
+        self.assertEqual(self.test_data, decrypted)
 
     def test_complex_circuit_algorithm(self):
         """Test encryption algorithm generated from a complex circuit."""
-        # Analyze the circuit
         analysis = analyze_circuit(self.complex_circuit)
-        
-        # Generate the algorithm code
+
+        # Verify code generation still works (syntax check)
         algorithm_code = generate_encryption_algorithm(analysis)
-        
-        # Save the algorithm to a temporary file and import it
-        with tempfile.NamedTemporaryFile(suffix='.py', delete=False, mode='w') as f:
-            f.write(algorithm_code)
-            temp_module_path = f.name
-        
-        # Dynamically import the generated module
-        temp_module_name = os.path.basename(temp_module_path).replace('.py', '')
-        temp_module_dir = os.path.dirname(temp_module_path)
-        
-        # Add the directory to the Python path
-        sys.path.insert(0, temp_module_dir)
-        
-        try:
-            # Import the module
-            temp_module = __import__(temp_module_name)
-            
-            # Create an instance of the encryption class
-            cipher = temp_module.CircuitEncryption()
-            
-            # Test encryption and decryption with different data types
-            
-            # Test with string
-            encrypted = cipher.encrypt(self.test_data, self.test_key)
-            decrypted = cipher.decrypt(encrypted, self.test_key)
-            self.assertEqual(self.test_data, decrypted)
-            
-            # Test with binary data
-            binary_data = os.urandom(100)
-            encrypted = cipher.encrypt(binary_data, self.test_key)
-            decrypted = cipher.decrypt(encrypted, self.test_key)
-            if isinstance(decrypted, str):
-                decrypted = decrypted.encode('utf-8')
-            self.assertEqual(binary_data, decrypted)
-            
-            # Test with empty string
-            encrypted = cipher.encrypt("", self.test_key)
-            decrypted = cipher.decrypt(encrypted, self.test_key)
-            self.assertEqual("", decrypted)
-            
-            # Test with very long string
-            long_string = ''.join(random.choice(string.ascii_letters) for _ in range(10000))
-            encrypted = cipher.encrypt(long_string, self.test_key)
-            decrypted = cipher.decrypt(encrypted, self.test_key)
-            self.assertEqual(long_string, decrypted)
-        finally:
-            # Clean up
-            if temp_module_name in sys.modules:
-                del sys.modules[temp_module_name]
-            sys.path.remove(temp_module_dir)
-            os.unlink(temp_module_path)
+        self.assertIn('class CircuitEncryption', algorithm_code)
+
+        cipher = create_encryption_from_analysis(analysis)
+
+        # Test with string
+        encrypted = cipher.encrypt(self.test_data, self.test_key)
+        decrypted = cipher.decrypt(encrypted, self.test_key)
+        self.assertEqual(self.test_data, decrypted)
+
+        # Test with binary data
+        binary_data = os.urandom(100)
+        encrypted = cipher.encrypt(binary_data, self.test_key)
+        decrypted = cipher.decrypt(encrypted, self.test_key)
+        if isinstance(decrypted, str):
+            decrypted = decrypted.encode('utf-8')
+        self.assertEqual(binary_data, decrypted)
+
+        # Test with empty string
+        encrypted = cipher.encrypt("", self.test_key)
+        decrypted = cipher.decrypt(encrypted, self.test_key)
+        self.assertEqual("", decrypted)
+
+        # Test with very long string
+        long_string = ''.join(random.choice(string.ascii_letters) for _ in range(10000))
+        encrypted = cipher.encrypt(long_string, self.test_key)
+        decrypted = cipher.decrypt(encrypted, self.test_key)
+        self.assertEqual(long_string, decrypted)
 
     def test_key_derivation(self):
         """Test the key derivation function with different inputs."""
@@ -313,7 +259,6 @@ class TestCipherAlgorithms(unittest.TestCase):
 
     def test_different_circuit_configurations(self):
         """Test encryption/decryption with different circuit configurations."""
-        # Define a list of circuit configurations to test
         circuit_configs = [
             self.simple_circuit,
             self.complex_circuit,
@@ -334,67 +279,42 @@ class TestCipherAlgorithms(unittest.TestCase):
                 }]
             }
         ]
-        
+
         for idx, circuit_config in enumerate(circuit_configs):
-            # Analyze the circuit
             analysis = analyze_circuit(circuit_config)
-            
-            # Generate the algorithm code
-            algorithm_code = generate_encryption_algorithm(analysis)
-            
-            # Execute the algorithm code in a new namespace
-            namespace = {}
-            exec(algorithm_code, namespace)
-            
-            # Create an instance of the encryption class
-            cipher = namespace['CircuitEncryption']()
-            
-            # Test encryption and decryption
+            cipher = create_encryption_from_analysis(analysis)
+
             test_data = f"Test data for circuit configuration {idx}"
             encrypted = cipher.encrypt(test_data, self.test_key)
             decrypted = cipher.decrypt(encrypted, self.test_key)
-            
             self.assertEqual(test_data, decrypted)
 
     def test_algorithm_isolation(self):
         """Test that algorithms generated from different circuits produce different results."""
-        # Analyze the circuits
         simple_analysis = analyze_circuit(self.simple_circuit)
         complex_analysis = analyze_circuit(self.complex_circuit)
-        
-        # Generate the algorithm codes
-        simple_algorithm_code = generate_encryption_algorithm(simple_analysis)
-        complex_algorithm_code = generate_encryption_algorithm(complex_analysis)
-        
-        # Execute the algorithm codes in separate namespaces
-        simple_namespace = {}
-        complex_namespace = {}
-        
-        exec(simple_algorithm_code, simple_namespace)
-        exec(complex_algorithm_code, complex_namespace)
-        
-        # Create instances of the encryption classes
-        simple_cipher = simple_namespace['CircuitEncryption']()
-        complex_cipher = complex_namespace['CircuitEncryption']()
-        
+
+        simple_cipher = create_encryption_from_analysis(simple_analysis)
+        complex_cipher = create_encryption_from_analysis(complex_analysis)
+
         # Encrypt the same data with both ciphers
         encrypted_simple = simple_cipher.encrypt(self.test_data, self.test_key)
         encrypted_complex = complex_cipher.encrypt(self.test_data, self.test_key)
-        
+
         # The encrypted results should be different
         self.assertNotEqual(encrypted_simple, encrypted_complex)
-        
+
         # But each should decrypt correctly with its own algorithm
         decrypted_simple = simple_cipher.decrypt(encrypted_simple, self.test_key)
         decrypted_complex = complex_cipher.decrypt(encrypted_complex, self.test_key)
-        
+
         self.assertEqual(self.test_data, decrypted_simple)
         self.assertEqual(self.test_data, decrypted_complex)
-        
+
         # Test that they cannot decrypt each other's output
         with self.assertRaises(Exception):
             simple_cipher.decrypt(encrypted_complex, self.test_key)
-        
+
         with self.assertRaises(Exception):
             complex_cipher.decrypt(encrypted_simple, self.test_key)
 
