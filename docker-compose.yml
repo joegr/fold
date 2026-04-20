@@ -38,12 +38,17 @@ services:
     build:
       context: ./pqc
       target: production
-    ports:
-      - "${PQC_PORT:-5001}:5001"
+    # SECURITY FIX Issue #9: No host port binding - internal Docker network only
+    # Only accessible via main app proxy, not directly from host network
+    # ports:
+    #   - "${PQC_PORT:-5001}:5001"
+    expose:
+      - "5001"  # Only exposed to other containers, not host
     environment:
       - PQC_PORT=5001
       - FLASK_DEBUG=0
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5000}
+      - API_KEY=${API_KEY}  # SECURITY: Required API key
     restart: unless-stopped
     read_only: true
     tmpfs:

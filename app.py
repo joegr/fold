@@ -17,6 +17,7 @@ import time
 import inspect
 import urllib.request
 import urllib.error
+from urllib.parse import urlparse
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -24,12 +25,62 @@ import urllib.error
 ALLOWED_ORIGINS = os.environ.get(
     'ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:5000'
 ).split(',')
-API_KEY = os.environ.get('API_KEY', None)
+API_KEY = os.environ.get('API_KEY')
+if not API_KEY:
+    raise ValueError('API_KEY environment variable must be set. Run: python -c "import secrets; print(secrets.token_urlsafe(32))"')
 MAX_CARDS = int(os.environ.get('MAX_CARDS', '20'))
 MAX_NODES_PER_CARD = int(os.environ.get('MAX_NODES_PER_CARD', '16'))
 MAX_REQUEST_SIZE = int(os.environ.get('MAX_REQUEST_SIZE', str(1 * 1024 * 1024)))  # 1 MB
 MAX_HISTORY_RECORDS = int(os.environ.get('MAX_HISTORY_RECORDS', '200'))
 PQC_SERVICE_URL = os.environ.get('PQC_SERVICE_URL', 'http://localhost:5001')
+
+
+def _validate_pqc_url(url: str) -> str:
+    """Validate PQC service URL to prevent SSRF attacks.
+    
+    Only allows:
+    - localhost/127.0.0.1
+    - Internal Docker network hosts (pqc, app, etc.)
+    - Private IP ranges (10.x, 172.16-31.x, 192.168.x)
+    """
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        
+        if not hostname:
+            raise ValueError('Invalid URL: no hostname')
+        
+        # Allow localhost variants
+        if hostname in ('localhost', '127.0.0.1', '::1'):
+            return url
+        
+        # Allow internal Docker service names (no dots, or .local domain)
+        if '.' not in hostname or hostname.endswith('.local'):
+            return url
+        
+        # Check private IP ranges
+        parts = hostname.split('.')
+        if len(parts) == 4 and all(p.isdigit() for p in parts):
+            # 10.0.0.0/8
+            if parts[0] == '10':
+                return url
+            # 172.16.0.0/12
+            if parts[0] == '172' and 16 <= int(parts[1]) <= 31:
+                return url
+            # 192.168.0.0/16
+            if parts[0] == '192' and parts[1] == '168':
+                return url
+            # 127.0.0.0/8 (loopback)
+            if parts[0] == '127':
+                return url
+        
+        raise ValueError(f'PQC_SERVICE_URL must be an internal address, got: {hostname}')
+    except ValueError as e:
+        raise ValueError(f'Invalid PQC_SERVICE_URL: {e}')
+
+
+# Validate PQC URL on startup
+PQC_SERVICE_URL = _validate_pqc_url(PQC_SERVICE_URL)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,10 +93,15 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 app = Flask(__name__, static_folder='build')
 app.config['MAX_CONTENT_LENGTH'] = MAX_REQUEST_SIZE
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32).hex())
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    raise ValueError('SECRET_KEY environment variable must be set. Run: python -c "import os; print(os.urandom(32).hex())"')
+app.config['SECRET_KEY'] = SECRET_KEY
 CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
 limiter = Limiter(get_remote_address, app=app, default_limits=["60 per minute"])
-encryption_records = []
+# SECURITY FIX Issue #5: Per-user isolated history storage
+# Keyed by a hash of API key + IP (simple user identification)
+encryption_records_by_user = {}
 
 ALLOWED_GATE_TYPES = frozenset({'AND', 'OR', 'XOR', 'NOT', 'NAND', 'NOR', 'BUFFER'})
 ALLOWED_CARD_TYPES = frozenset({
@@ -59,16 +115,26 @@ ALLOWED_CARD_TYPES = frozenset({
 # Security helpers
 # ---------------------------------------------------------------------------
 def require_api_key(f):
-    """Decorator that enforces API-key auth when API_KEY is configured."""
+    """Decorator that enforces API-key auth."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        if API_KEY is None:
-            return f(*args, **kwargs)
         key = request.headers.get('X-API-Key', '')
         if not hmac.compare_digest(key, API_KEY):
             return jsonify({'error': 'Unauthorized'}), 401
         return f(*args, **kwargs)
     return decorated
+
+
+def _get_user_id() -> str:
+    """Generate a unique identifier for the current user.
+    
+    SECURITY FIX Issue #5: Creates per-user isolation based on API key + IP.
+    This ensures each user only sees their own history records.
+    """
+    client_ip = get_remote_address()
+    # Use a hash of API key + IP to identify users without storing raw keys
+    user_key = f"{API_KEY}:{client_ip}"
+    return hashlib.sha256(user_key.encode()).hexdigest()[:32]
 
 
 def _safe_float(val, default=0.0):
@@ -183,8 +249,26 @@ def validate_circuit_data(data):
 def add_security_headers(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
+    # SECURITY FIX Issue #10: Removed deprecated X-XSS-Protection header
+    # (deprecated by all major browsers, can introduce XSS vulnerabilities)
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    # SECURITY FIX Issue #11: Added HSTS header for HTTPS deployments
+    # Max age: 1 year, includeSubDomains, preload
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
+    # SECURITY FIX Issue #16: Added Permissions-Policy header
+    response.headers['Permissions-Policy'] = (
+        'camera=(), microphone=(), geolocation=(), accelerometer=(), '
+        'gyroscope=(), magnetometer=(), payment=(), usb=(), midi=()'
+    )
+    # SECURITY NOTE Issue #12: style-src uses 'unsafe-inline' because React
+    # components in this codebase use inline style props extensively. Removing it
+    # would break the UI. To harden this, consider:
+    # 1. Using a CSP nonce (requires server-side rendering)
+    # 2. Moving all styles to external CSS files
+    # 3. Using styled-components with babel-plugin-styled-components
+    # The XSS risk is LOW here because:
+    # - No user-controlled data is rendered into style attributes
+    # - style-src does not execute code like script-src
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
     )
@@ -687,13 +771,26 @@ def api_generate_encryption():
             'complexity': analysis['summary']['complexity_score'],
             'algorithm_size': len(algorithm),
         }
-        encryption_records.append(record)
-        # Prevent unbounded memory growth
-        while len(encryption_records) > MAX_HISTORY_RECORDS:
-            encryption_records.pop(0)
+        # SECURITY FIX Issue #5: Per-user isolated storage
+        user_id = _get_user_id()
+        if user_id not in encryption_records_by_user:
+            encryption_records_by_user[user_id] = []
+        encryption_records_by_user[user_id].append(record)
+        # Prevent unbounded memory growth per user
+        while len(encryption_records_by_user[user_id]) > MAX_HISTORY_RECORDS:
+            encryption_records_by_user[user_id].pop(0)
+
+        # SECURITY FIX Issue #7: Add integrity verification (HMAC signature)
+        # This allows clients to verify the algorithm hasn't been tampered with in transit
+        algorithm_signature = hmac.new(
+            API_KEY.encode(),
+            algorithm.encode(),
+            hashlib.sha256
+        ).hexdigest()
 
         return jsonify({
             'algorithm': algorithm,
+            'algorithm_signature': algorithm_signature,  # HMAC-SHA256 for integrity
             'analysis': analysis['summary'],
         })
 
@@ -706,8 +803,13 @@ def api_generate_encryption():
 @require_api_key
 @limiter.limit("60 per minute")
 def api_history():
-    """Get history of encryption algorithms generated"""
-    return jsonify({'records': encryption_records})
+    """Get history of encryption algorithms generated by the current user.
+    
+    SECURITY FIX Issue #5: Returns only records for the authenticated user.
+    """
+    user_id = _get_user_id()
+    user_records = encryption_records_by_user.get(user_id, [])
+    return jsonify({'records': user_records, 'user_isolated': True})
 
 
 @app.route('/', defaults={'path': ''})
@@ -823,4 +925,14 @@ def api_pqc_decrypt():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_DEBUG', '0') == '1'
+    
+    # SECURITY FIX Issue #13: Warn about or block debug mode in production
+    if debug:
+        logger.warning('=' * 60)
+        logger.warning('WARNING: Flask debug mode is ENABLED!')
+        logger.warning('Debug mode allows arbitrary code execution via')
+        logger.warning('the interactive debugger console. NEVER enable in')
+        logger.warning('production or on publicly accessible servers!')
+        logger.warning('=' * 60)
+    
     app.run(host='0.0.0.0', port=port, debug=debug)

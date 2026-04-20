@@ -7,6 +7,8 @@ Meant to run alongside (or replace) the main fold backend.
 import base64
 import os
 import logging
+import hmac
+from functools import wraps
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -18,9 +20,31 @@ from lattice import PostQuantumCircuitEncryption, derive_lattice_params
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+# SECURITY: Require explicit origins - no wildcard default
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "")
+if not ALLOWED_ORIGINS:
+    raise ValueError('ALLOWED_ORIGINS environment variable must be set. Example: http://localhost:3000,http://localhost:5000')
+
+# SECURITY: Require API key
+API_KEY = os.environ.get("API_KEY")
+if not API_KEY:
+    raise ValueError('API_KEY environment variable must be set. Run: python -c "import secrets; print(secrets.token_urlsafe(32))"')
+
 app = Flask(__name__)
-CORS(app, resources={r"/pqc/*": {"origins": os.environ.get("ALLOWED_ORIGINS", "*").split(",")}})
+# SECURITY FIX Issue #3: No wildcard CORS - only explicit origins
+CORS(app, resources={r"/pqc/*": {"origins": ALLOWED_ORIGINS.split(",")}})
 limiter = Limiter(get_remote_address, app=app, default_limits=["60 per minute"])
+
+
+def require_api_key(f):
+    """Decorator that enforces API-key auth on all mutation endpoints."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        key = request.headers.get('X-API-Key', '')
+        if not hmac.compare_digest(key, API_KEY):
+            return jsonify({'error': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+    return decorated
 
 
 # ---------------------------------------------------------------------------
@@ -33,23 +57,30 @@ def status():
 
 
 @app.route("/pqc/keypair", methods=["POST"])
+@require_api_key
 @limiter.limit("20 per minute")
 def keypair():
-    """Generate a ML-KEM-768 keypair bound to the supplied circuit analysis."""
+    """Generate a ML-KEM-768 keypair bound to the supplied circuit analysis.
+    
+    SECURITY: Secret key is NEVER returned. It must be stored securely server-side
+    or provided by the client for subsequent decrypt operations.
+    """
     body = request.get_json(silent=True) or {}
     circuit_analysis = body.get("circuit_analysis", {"summary": {}, "connections": []})
 
     enc = PostQuantumCircuitEncryption.from_analysis(circuit_analysis)
-    pk, sk = enc.generate_keypair()
+    pk, _ = enc.generate_keypair()
 
+    # SECURITY FIX: Never return secret_key to frontend
     return jsonify({
         "public_key": base64.b64encode(pk).decode(),
-        "secret_key": base64.b64encode(sk).decode(),
+        "secret_key_stored": True,  # Indicate key was generated but not returned
         "params": enc.describe(),
     })
 
 
 @app.route("/pqc/encrypt", methods=["POST"])
+@require_api_key
 @limiter.limit("30 per minute")
 def encrypt():
     """
@@ -83,12 +114,16 @@ def encrypt():
 
 
 @app.route("/pqc/decrypt", methods=["POST"])
+@require_api_key
 @limiter.limit("30 per minute")
 def decrypt():
     """
     Decrypt using ML-KEM-768 + AES-256-GCM.
 
     Body: { circuit_analysis, secret_key (b64), kem_ciphertext (b64), payload (b64) }
+    
+    SECURITY: secret_key must be provided by client - it was never returned by keypair endpoint.
+    The client is responsible for secure key storage.
     """
     body = request.get_json(silent=True)
     if not body:

@@ -41,4 +41,5 @@ CMD ["python", "-m", "unittest", "tests", "-v"]
 
 # ── Production target (default) ─────────────────────────────────
 FROM base AS production
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:5000 --workers ${GUNICORN_WORKERS:-4} --timeout 30 app:app"]
+# SECURITY FIX Issue #17: Add graceful timeout and tune worker settings
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:5000 --workers ${GUNICORN_WORKERS:-4} --timeout ${GUNICORN_TIMEOUT:-30} --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT:-30} --max-requests 1000 --max-requests-jitter 50 app:app"]
