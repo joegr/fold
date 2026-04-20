@@ -63,9 +63,9 @@ custom encryption algorithm that wraps AES-256-CBC.
 │  Flask REST API  (app.py)   :5000                    │
 │  ├─ Input validation & sanitization                  │
 │  ├─ Circuit analysis (analyze_circuit)               │
-│  ├─ Code generation (generate_encryption_algorithm)  │
+│  ├─ Circuit parameter derivation                     │
 │  ├─ Safe factory  (create_encryption_from_analysis)  │
-│  ├─ CircuitEncryption class (encrypt / decrypt)      │
+│  ├─ CircuitEncryption (AES-256-GCM + scrypt + HKDF) │
 │  └─ /api/pqc/* proxy → PQC sidecar                  │
 ├──────────────────────────────────────────────────────┤
 │  PQC Sidecar  (pqc/server.py)   :5001                │
@@ -221,7 +221,9 @@ python -m unittest tests -v
    **Card Library** to add it to the stack.
 3. The 3D canvas updates in real-time as cards are stacked.
 4. Click **FINALIZE** to send the stack to `/api/generate_encryption`.
-5. The returned Python code appears below the canvas — copy or save it.
+5. The returned JSON **parameters** (plus HMAC signature) appear below the
+   canvas. Feed them into `CircuitEncryption(parameters)` locally; the server
+   no longer emits runnable Python source.
 6. Use **Clear Stack** to reset.
 
 ---
@@ -231,14 +233,20 @@ python -m unittest tests -v
 All `/api/` endpoints support optional API-key authentication. Set `API_KEY` in your
 environment and pass the key via the `X-API-Key` request header.
 
+Auth model: every mutating endpoint requires EITHER a valid `X-API-Key`
+header (server-to-server) OR a Flask session cookie (browser). Browsers call
+`POST /api/session` once on page load to obtain the cookie; the API key is
+never shipped in the frontend bundle.
+
 | Method | Endpoint                   | Auth     | Rate Limit   | Description                        |
 | ------ | -------------------------- | -------- | ------------ | ---------------------------------- |
-| POST   | `/api/generate_encryption` | optional | 10 req / min | Generate encryption from cards     |
-| GET    | `/api/history`             | optional | 60 req / min | Retrieve generation history        |
+| POST   | `/api/session`             | none     | 30 req / min | Mint an anonymous browser session  |
+| POST   | `/api/generate_encryption` | required | 10 req / min | Generate encryption parameters     |
+| GET    | `/api/history`             | required | 60 req / min | Retrieve generation history        |
 | GET    | `/api/status`              | none     | 60 req / min | Health-check / version info        |
-| POST   | `/api/pqc/keypair`         | optional | 10 req / min | Generate ML-KEM-768 keypair        |
+| POST   | `/api/pqc/keypair`         | required | 10 req / min | Generate ML-KEM-768 keypair        |
 | POST   | `/api/pqc/encrypt`         | optional | 10 req / min | PQ encrypt (KEM + AES-256-GCM)     |
-| POST   | `/api/pqc/decrypt`         | optional | 10 req / min | PQ decrypt (KEM + AES-256-GCM)     |
+| POST   | `/api/pqc/decrypt`         | required | 10 req / min | PQ decrypt (KEM + AES-256-GCM)     |
 | GET    | `/api/pqc/status`          | none     | 60 req / min | PQC sidecar health-check           |
 
 ### POST `/api/generate_encryption`
@@ -329,7 +337,11 @@ All settings are managed via environment variables. Copy `.env.example` → `.en
 | `MAX_REQUEST_SIZE`   | `1048576`                                    | Max request body in bytes (1 MB)         |
 | `MAX_HISTORY_RECORDS`| `200`                                        | Max generation history entries in memory  |
 | `GUNICORN_WORKERS`   | `4`                                          | Gunicorn worker processes (prod only)    |
-| `REACT_APP_API_KEY`  | *(empty)*                                    | Frontend sends this as `X-API-Key`       |
+| `REDIS_URL`          | *(empty)*                                    | Shared Flask-Limiter storage (recommended in prod) |
+| `TRUSTED_PROXY_HOPS` | `0`                                          | Number of trusted reverse-proxy hops for ProxyFix  |
+| `SCRYPT_N`           | `32768`                                      | scrypt N parameter (CircuitEncryption KDF)         |
+| `SESSION_COOKIE_SECURE` | `1`                                       | Set to `0` only for localhost HTTP development     |
+| `PQC_ALLOWED_HOSTNAMES` | `pqc,localhost`                           | Explicit SSRF allowlist for the PQC proxy         |
 
 For production behind a reverse proxy, also configure the rate-limiter storage
 backend (see [Flask-Limiter docs](https://flask-limiter.readthedocs.io)).
@@ -442,10 +454,11 @@ the repo's GitHub Packages.
 - **Input validation** — all incoming circuit data is deep-validated: types are
   checked, strings are length-capped, floats reject `Infinity`/`NaN`, and gate types
   are restricted to a 7-value allowlist.
-- **No dynamic code execution** — server-side encryption instances use
-  `create_encryption_from_analysis()` (safe factory). No `exec()` or `eval()`.
-- **Constructor safety** — `CircuitEncryption.__init__` restricts `setattr` to a
-  frozen key set and clamps numeric constants to safe upper bounds.
+- **No dynamic code execution** — the server does not emit runnable Python
+  source; it returns a structured `parameters` object. No `exec()` or `eval()`.
+- **Authenticated encryption** — `CircuitEncryption` is AES-256-GCM with a
+  per-message random salt (scrypt KDF) and random 96-bit nonce. Circuit
+  parameters are bound to each ciphertext via HKDF info AND AES-GCM AAD.
 - **Timing-safe auth** — API key comparison uses `hmac.compare_digest()`.
 - **CORS** — restricted to explicitly configured origins.
 - **Rate limiting** — per-IP via Flask-Limiter (10/min for generation, 60/min
@@ -465,18 +478,25 @@ the repo's GitHub Packages.
 
 ### Classical encryption internals
 
-The `CircuitEncryption` class implements a layered scheme:
+The `CircuitEncryption` class is intentionally a thin wrapper:
 
-1. **Key derivation** — SHA-256 hash of the user key, then multiple rounds of
-   circuit-matrix-driven mixing and logic-gate-based byte operations.
-2. **Pre-encryption transform** — reversible substitution (add mod 256), XOR
-   diffusion, and deterministic byte permutation derived from the connection matrix.
-3. **AES-256-CBC** — standard encryption using `pyca/cryptography` with a random
-   16-byte IV prepended to the ciphertext.
-4. **PKCS7 padding** — ensures block alignment.
+1. **Key derivation** — `scrypt(password, salt)` → base key, then
+   `HKDF-SHA256(base, info=circuit_params)` → 32-byte AES key. Salt is 16
+   random bytes per message.
 
-Decryption runs the inverse: base64-decode → extract IV → AES-CBC decrypt → reverse
-transform → unpad.
+   *(Previously this class implemented homegrown AES-CBC + hand-rolled
+   byte permutations with `SHA-256(password)` as the key; that design was
+   removed because it provided no authentication and was vulnerable to
+   padding-oracle and offline brute-force attacks.)*
+2. **AES-256-GCM** — authenticated encryption using `pyca/cryptography` with a
+   random 12-byte nonce per message. Circuit parameters are passed as
+   Additional Authenticated Data (AAD), so ciphertexts are cryptographically
+   tied to the circuit topology that produced them.
+3. **Wire format** — base64 of `FOLD2 || salt(16) || nonce(12) || AES-GCM output`.
+
+Decryption validates the magic prefix, re-derives the key with scrypt+HKDF,
+and verifies the GCM tag before returning plaintext. Any tampering anywhere
+in the blob (salt, nonce, ciphertext, or AAD) causes decryption to fail.
 
 ### Post-quantum encryption internals
 

@@ -1,11 +1,12 @@
-# ── Stage 1: Build React frontend ────────────────────────────────
-FROM node:18-slim AS frontend
+# ── Stage 1: Build React frontend (Vite) ─────────────────────────
+# Vite 7 requires Node >= 20.19 / >= 22.12. We use Node 22 LTS.
+FROM node:22-slim AS frontend
 WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY public/ public/
 COPY src/ src/
-COPY tsconfig.json ./
+COPY index.html tsconfig.json tsconfig.node.json vite.config.ts ./
 RUN npm run build
 
 # ── Stage 2: Python base ────────────────────────────────────────
@@ -41,4 +42,5 @@ CMD ["python", "-m", "unittest", "tests", "-v"]
 
 # ── Production target (default) ─────────────────────────────────
 FROM base AS production
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:5000 --workers ${GUNICORN_WORKERS:-4} --timeout 30 app:app"]
+# SECURITY FIX Issue #17: Add graceful timeout and tune worker settings
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:5000 --workers ${GUNICORN_WORKERS:-4} --timeout ${GUNICORN_TIMEOUT:-30} --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT:-30} --max-requests 1000 --max-requests-jitter 50 app:app"]

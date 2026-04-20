@@ -6,57 +6,189 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-
+# ────────────────────────────────────────────────────────────────
+# Default permissions: read-only. Jobs that need write access raise
+# it locally at the job scope (principle of least privilege).
 permissions:
   contents: read
-  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  # ghcr.io/<owner>/<repo>
+  IMAGE_NAME: ${{ github.repository }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 # ────────────────────────────────────────────────────────────────
 jobs:
 
-  # ── 1. Lint & unit tests ────────────────────────────────────
+  # ── 1. Classical backend unit tests ─────────────────────────────
   test:
+    name: Backend tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create .env from template
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Prepare .env from template
         run: cp .env.example .env
 
-      - name: Build test image
-        run: docker compose build test
+      - name: Build test image (with GHA layer cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: test
+          load: true
+          tags: fold:test
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
 
-      - name: Run unit tests
-        run: docker compose run --rm test
-
-  # ── 2. Build, smoke-test, push ──────────────────────────────
-  build-and-push:
-    needs: test
-    runs-on: ubuntu-latest
-    # Only push on main branch (not PRs)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Create .env from template
-        run: cp .env.example .env
-
-      # ── Smoke test before pushing ───────────────────────────
-      - name: Build production image (local tag)
-        run: docker compose build app
-
-      - name: Smoke-test production container
+      - name: Run unit tests (lower SCRYPT_N for speed)
         run: |
-          docker compose up app -d
-          sleep 5
-          curl -sf http://localhost:5000/api/status | grep '"status":"online"'
-          curl -sf -o /dev/null -w "%{http_code}" http://localhost:5000/ | grep 200
-          docker compose down
+          docker run --rm \
+            --env-file .env \
+            -e SCRYPT_N=1024 \
+            fold:test
 
-      # ── Push to GHCR ────────────────────────────────────────
+  # ── 2. PQC image build (validates from-source liboqs) ───────────
+  # This is the most expensive stage in CI (liboqs is built from source).
+  # GHA cache keeps warm runs fast; cold runs take ~5 min.
+  pqc-build:
+    name: PQC image build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build PQC image (validates liboqs compile + oqs import)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./pqc
+          target: production
+          load: true
+          tags: fold-pqc:ci
+          cache-from: type=gha,scope=pqc
+          cache-to: type=gha,mode=max,scope=pqc
+
+      - name: Sanity-check PQC container boots and /pqc/status responds
+        run: |
+          docker run -d --name pqc-probe \
+            -e API_KEY=probe-key \
+            -e ALLOWED_ORIGINS=http://localhost:5000 \
+            -p 5001:5001 \
+            fold-pqc:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5001/pqc/status | grep -q '"status":"online"'; then
+              echo "pqc is up after ${i} tries"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "pqc failed to come up"
+          docker logs pqc-probe || true
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f pqc-probe 2>/dev/null || true
+
+  # ── 3. Integration smoke test + push to GHCR ────────────────────
+  build-and-push:
+    name: Smoke-test + push
+    needs: [test, pqc-build]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Raise permissions only for this job (needs to push to GHCR and
+    # upload provenance/SBOM attestations).
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Prepare .env from template
+        run: cp .env.example .env
+
+      # Build both images once via buildx with GHA cache, load them into
+      # the local Docker daemon, then let docker-compose consume them via
+      # an override file (no second build for the smoke test).
+      - name: Build app image (cached, loaded locally)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: production
+          load: true
+          tags: fold-app:ci
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+
+      - name: Build pqc image (cached, loaded locally)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./pqc
+          target: production
+          load: true
+          tags: fold-pqc:ci
+          cache-from: type=gha,scope=pqc
+          cache-to: type=gha,mode=max,scope=pqc
+
+      - name: Point docker-compose at the pre-built images
+        run: |
+          cat > docker-compose.override.yml <<'EOF'
+          services:
+            app:
+              image: fold-app:ci
+              pull_policy: never
+            pqc:
+              image: fold-pqc:ci
+              pull_policy: never
+          EOF
+
+      - name: Smoke-test the full stack
+        run: |
+          set -euo pipefail
+          docker compose up -d --no-build app
+          echo "Waiting for app to respond on :5000..."
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:5000/api/status | grep -q '"status":"online"'; then
+              echo "app is up after ${i} attempts"
+              break
+            fi
+            sleep 2
+            if [ "$i" = "60" ]; then
+              echo "app failed to become healthy in 120s"
+              docker compose ps
+              docker compose logs --no-color --tail=200
+              exit 1
+            fi
+          done
+          curl -sf http://localhost:5000/api/status | grep '"status":"online"'
+          code=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:5000/)
+          if [ "$code" != "200" ]; then
+            echo "frontend root returned HTTP $code, expected 200"
+            exit 1
+          fi
+          echo "smoke test OK"
+
+      - name: Stack logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=400
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -64,8 +196,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels)
-        id: meta
+      # ── Tag metadata for both images ────────────────────────────
+      - name: Extract metadata for app image
+        id: meta_app
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
@@ -73,11 +206,55 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push to GHCR
+      - name: Extract metadata for pqc image
+        id: meta_pqc
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-pqc
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # ── Build + push (buildx handles GHA cache reuse) ───────────
+      - name: Build and push app image
+        id: push_app
         uses: docker/build-push-action@v6
         with:
           context: .
           target: production
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta_app.outputs.tags }}
+          labels: ${{ steps.meta_app.outputs.labels }}
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+          provenance: mode=max
+          sbom: true
+
+      - name: Build and push pqc image
+        id: push_pqc
+        uses: docker/build-push-action@v6
+        with:
+          context: ./pqc
+          target: production
+          push: true
+          tags: ${{ steps.meta_pqc.outputs.tags }}
+          labels: ${{ steps.meta_pqc.outputs.labels }}
+          cache-from: type=gha,scope=pqc
+          cache-to: type=gha,mode=max,scope=pqc
+          provenance: mode=max
+          sbom: true
+
+      # ── Sigstore-free attestations via GitHub's native OIDC ─────
+      - name: Attest app image
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push_app.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest pqc image
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-pqc
+          subject-digest: ${{ steps.push_pqc.outputs.digest }}
+          push-to-registry: true

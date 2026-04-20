@@ -12,7 +12,8 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [pqcMode, setPqcMode] = useState<boolean>(false);
   const [pqcStatus, setPqcStatus] = useState<'checking' | 'online' | 'offline'>('checking');
-  const [pqcKeypair, setPqcKeypair] = useState<{ publicKey: string; secretKey: string } | null>(null);
+  const [pqcPublicKey, setPqcPublicKey] = useState<string | null>(null);
+  const [pqcSecretKey, setPqcSecretKey] = useState<string | null>(null); // Client-managed only
   
   const addCardToStack = (card: CircuitCard) => {
     setStackedCards([...stackedCards, { ...card, id: `${card.id}-${Date.now()}` }]);
@@ -28,9 +29,13 @@ const App: React.FC = () => {
     setStackedCards(newStack);
   };
   
-  // Check PQC sidecar availability on mount
+  // Mint an anonymous session cookie and probe PQC availability on mount.
+  // The session cookie replaces the previous (insecure) practice of baking
+  // REACT_APP_API_KEY into the client bundle.
   useEffect(() => {
-    fetch('/api/pqc/status')
+    fetch('/api/session', { method: 'POST', credentials: 'include' })
+      .catch(() => { /* non-fatal; endpoints requiring auth will 401 */ });
+    fetch('/api/pqc/status', { credentials: 'include' })
       .then(r => r.ok ? setPqcStatus('online') : setPqcStatus('offline'))
       .catch(() => setPqcStatus('offline'));
   }, []);
@@ -38,12 +43,19 @@ const App: React.FC = () => {
   const clearStack = () => {
     setStackedCards([]);
     setApiResponse(null);
-    setPqcKeypair(null);
+    setPqcPublicKey(null);
+    // Note: pqcSecretKey is intentionally NOT cleared here to allow decryption
+    // The client is responsible for managing their own secret key
   };
 
   const hasPqCards = stackedCards.some(c =>
     c.type === 'lattice' || c.type === 'code_based' || c.type === 'hash_based'
   );
+
+  // SECURITY: the frontend authenticates via the session cookie minted by
+  // /api/session on mount. We no longer ship an API key in the bundle; all
+  // requests carry credentials so the browser sends the signed session cookie.
+  const jsonHeaders = { 'Content-Type': 'application/json' };
 
   const finalizePqc = async () => {
     if (stackedCards.length === 0) {
@@ -52,33 +64,37 @@ const App: React.FC = () => {
     }
     setIsLoading(true);
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const apiKey = (window as any).__FOLD_API_KEY || process.env.REACT_APP_API_KEY;
-      if (apiKey) headers['X-API-Key'] = apiKey;
-
-      // Step 1: generate classical analysis
+      // Step 1: classical analysis + parameters
       const analysisResp = await fetch('/api/generate_encryption', {
         method: 'POST',
-        headers,
+        credentials: 'include',
+        headers: jsonHeaders,
         body: JSON.stringify({ cards: stackedCards, timestamp: new Date().toISOString() }),
       });
       if (!analysisResp.ok) throw new Error(`Analysis failed: ${analysisResp.status}`);
       const analysisData = await analysisResp.json();
 
-      // Step 2: generate PQ keypair bound to circuit
+      // Step 2: PQ keypair bound to circuit
       const keypairResp = await fetch('/api/pqc/keypair', {
         method: 'POST',
-        headers,
+        credentials: 'include',
+        headers: jsonHeaders,
         body: JSON.stringify({ circuit_analysis: analysisData.analysis }),
       });
       if (!keypairResp.ok) throw new Error(`PQC keypair failed: ${keypairResp.status}`);
       const keypairData = await keypairResp.json();
-      setPqcKeypair({ publicKey: keypairData.public_key, secretKey: keypairData.secret_key });
+      setPqcPublicKey(keypairData.public_key);
 
-      // Step 3: test encrypt round-trip
+      // Note: the server never returns a secret key. Decrypt is only
+      // exercised when the user supplies one they already hold.
+      const clientSecretKey = prompt('Enter your secret key (base64), or leave blank to skip decrypt test:');
+      if (clientSecretKey) setPqcSecretKey(clientSecretKey);
+
+      // Step 3: encrypt
       const encResp = await fetch('/api/pqc/encrypt', {
         method: 'POST',
-        headers,
+        credentials: 'include',
+        headers: jsonHeaders,
         body: JSON.stringify({
           circuit_analysis: analysisData.analysis,
           public_key: keypairData.public_key,
@@ -88,40 +104,48 @@ const App: React.FC = () => {
       if (!encResp.ok) throw new Error(`PQC encrypt failed: ${encResp.status}`);
       const encData = await encResp.json();
 
-      const decResp = await fetch('/api/pqc/decrypt', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          circuit_analysis: analysisData.analysis,
-          secret_key: keypairData.secret_key,
-          kem_ciphertext: encData.kem_ciphertext,
-          payload: encData.payload,
-        }),
-      });
-      if (!decResp.ok) throw new Error(`PQC decrypt failed: ${decResp.status}`);
-      const decData = await decResp.json();
+      // Step 4: optional decrypt (client-supplied secret key only)
+      let decryptResult = '[Skipped - no secret key provided]';
+      if (pqcSecretKey || clientSecretKey) {
+        const secretKeyToUse = pqcSecretKey || clientSecretKey;
+        const decResp = await fetch('/api/pqc/decrypt', {
+          method: 'POST',
+          credentials: 'include',
+          headers: jsonHeaders,
+          body: JSON.stringify({
+            circuit_analysis: analysisData.analysis,
+            secret_key: secretKeyToUse,
+            kem_ciphertext: encData.kem_ciphertext,
+            payload: encData.payload,
+          }),
+        });
+        if (!decResp.ok) throw new Error(`PQC decrypt failed: ${decResp.status}`);
+        const decData = await decResp.json();
+        decryptResult = decData.plaintext;
+      }
 
+      const params = analysisData.parameters || {};
       const output = [
         '# Post-Quantum Encryption Result',
-        `# Algorithm: ${keypairData.params?.kem_algorithm || 'ML-KEM-768'}`,
+        `# KEM: ${keypairData.params?.kem_algorithm || 'ML-KEM-768'}`,
         `# NIST Standard: ${keypairData.params?.nist_standard || 'FIPS 203'}`,
         `# Symmetric: ${keypairData.params?.symmetric || 'AES-256-GCM'}`,
-        `# Circuit Seed: ${keypairData.params?.circuit_seed || 'N/A'}`,
-        `# PQ Secure: ${keypairData.params?.pq_secure ? 'YES' : 'NO'}`,
+        `# Circuit Seed: ${params.circuit_seed || 'N/A'}`,
         '',
         '# --- Keypair ---',
         `public_key  = "${keypairData.public_key.substring(0, 64)}..."  # ${keypairData.public_key.length} chars (base64)`,
-        `secret_key  = "${keypairData.secret_key.substring(0, 64)}..."  # ${keypairData.secret_key.length} chars (base64)`,
+        `secret_key  = "[CLIENT-MANAGED - never transmitted]"`,
         '',
         '# --- Encrypt ---',
         `kem_ciphertext = "${encData.kem_ciphertext.substring(0, 64)}..."`,
         `payload        = "${encData.payload.substring(0, 64)}..."`,
         '',
         '# --- Decrypt (round-trip verified) ---',
-        `plaintext = "${decData.plaintext}"`,
+        `plaintext = "${decryptResult}"`,
         '',
-        '# --- Classical Algorithm (hybrid) ---',
-        analysisData.algorithm,
+        '# --- Classical cipher parameters (public; feed into CircuitEncryption) ---',
+        JSON.stringify(params, null, 2),
+        `# parameters_signature = ${analysisData.parameters_signature}`,
       ].join('\n');
       setApiResponse(output);
     } catch (error) {
@@ -131,38 +155,44 @@ const App: React.FC = () => {
       setIsLoading(false);
     }
   };
-  
+
   const finalizeCircuit = async () => {
     if (stackedCards.length === 0) {
       alert('Please add at least one card to the stack before finalizing.');
       return;
     }
-    
+
     setIsLoading(true);
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      const apiKey = (window as any).__FOLD_API_KEY || process.env.REACT_APP_API_KEY;
-      if (apiKey) {
-        headers['X-API-Key'] = apiKey;
-      }
-
       const response = await fetch('/api/generate_encryption', {
         method: 'POST',
-        headers,
-        body: JSON.stringify({ 
+        credentials: 'include',
+        headers: jsonHeaders,
+        body: JSON.stringify({
           cards: stackedCards,
-          timestamp: new Date().toISOString()
-        })
+          timestamp: new Date().toISOString(),
+        }),
       });
-      
+
       if (!response.ok) {
         throw new Error(`API responded with status: ${response.status}`);
       }
-      
+
       const data = await response.json();
-      setApiResponse(data.algorithm);
+      // SECURITY: the server no longer emits runnable Python source. It now
+      // returns structured parameters; display them verbatim so the user can
+      // pass them to a local CircuitEncryption instance.
+      const output = [
+        '# Circuit Encryption Parameters',
+        '# Algorithm: AES-256-GCM with scrypt+HKDF key derivation.',
+        '# These parameters are public; the secret is the user-supplied password.',
+        '',
+        JSON.stringify(data.parameters, null, 2),
+        '',
+        `# parameters_signature = ${data.parameters_signature}`,
+        `# (verify server-side with HMAC-SHA256 keyed from HKDF(SECRET_KEY))`,
+      ].join('\n');
+      setApiResponse(output);
     } catch (error) {
       console.error('Error finalizing circuit:', error);
       setApiResponse(`Error: ${error instanceof Error ? error.message : String(error)}`);

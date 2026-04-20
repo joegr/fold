@@ -1,4 +1,14 @@
-cryptography==44.0.0
+# NOTE: `oqs` (liboqs-python) is installed from a pinned git commit in the
+# Dockerfile (see `pqc/Dockerfile`'s builder stage). It is intentionally NOT
+# listed here because the pin belongs in the Dockerfile where it is paired
+# with the corresponding liboqs (C library) commit pin. When developing
+# locally without Docker, install with:
+#
+#   pip install git+https://github.com/open-quantum-safe/liboqs-python@<commit>
+#
+# and ensure liboqs is built and installed to a library path reachable by
+# the dynamic loader (e.g. /usr/local/lib).
+cryptography==44.0.1
 numpy==2.2.4
 flask==3.1.0
 flask-cors==5.0.1
