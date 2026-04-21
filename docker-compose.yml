@@ -12,6 +12,28 @@
 # ─────────────────────────────────────────────────────────────
 
 services:
+  # ── Redis (shared Flask-Limiter storage) ──────────────────
+  # Internal-only. Gives accurate rate limits across gunicorn workers and
+  # between the main app and the PQC sidecar. No host port, no volume (counters
+  # can be lost on restart without affecting correctness).
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    expose:
+      - "6379"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /data
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   # ── Production server (gunicorn) ──────────────────────────
   app:
     build:
@@ -23,9 +45,13 @@ services:
       - .env
     environment:
       - PQC_SERVICE_URL=http://pqc:5001
+      # Shared rate-limit storage; overrides any REDIS_URL in .env.
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       pqc:
         condition: service_started
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -49,6 +75,11 @@ services:
       - FLASK_DEBUG=0
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5000}
       - API_KEY=${API_KEY}  # SECURITY: Required API key
+      # Use DB 1 so pqc counters don't collide with the main app on DB 0.
+      - REDIS_URL=redis://redis:6379/1
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -80,20 +111,30 @@ services:
       - test
 
   # ── Dev server (Flask debug mode) ────────────────────────
+  # SECURITY: The Werkzeug debugger allows arbitrary code execution on any
+  # client that can hit the port. This service binds the host port to
+  # 127.0.0.1 only so the debugger is not reachable from the LAN. The
+  # FOLD_ALLOW_DEBUG_BIND=1 opt-in tells app.py it is OK to bind 0.0.0.0
+  # inside the container (required for Docker port forwarding to work).
+  # Do NOT change the host-side bind to 0.0.0.0 while FLASK_DEBUG=1.
   dev:
     build:
       context: .
       target: base
     ports:
-      - "${PORT:-5000}:5000"
+      - "127.0.0.1:${PORT:-5000}:5000"
     env_file:
       - .env
     environment:
       - FLASK_DEBUG=1
+      - FOLD_ALLOW_DEBUG_BIND=1
       - PQC_SERVICE_URL=http://pqc:5001
+      - REDIS_URL=redis://redis:6379/0
     command: ["python", "app.py"]
     depends_on:
       pqc:
         condition: service_started
+      redis:
+        condition: service_healthy
     profiles:
       - dev

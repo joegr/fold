@@ -5,6 +5,7 @@ Meant to run alongside (or replace) the main fold backend.
 """
 
 import base64
+import ipaddress
 import os
 import logging
 import hmac
@@ -21,19 +22,47 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 # SECURITY: Require explicit origins - no wildcard default
-ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "")
+_raw_origins = os.environ.get("ALLOWED_ORIGINS", "")
+ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 if not ALLOWED_ORIGINS:
-    raise ValueError('ALLOWED_ORIGINS environment variable must be set. Example: http://localhost:3000,http://localhost:5000')
+    raise ValueError(
+        "ALLOWED_ORIGINS environment variable must be set. "
+        "Example: http://localhost:3000,http://localhost:5000"
+    )
+if any(o == "*" for o in ALLOWED_ORIGINS):
+    raise ValueError("ALLOWED_ORIGINS must not contain a wildcard ('*').")
 
 # SECURITY: Require API key
 API_KEY = os.environ.get("API_KEY")
 if not API_KEY:
-    raise ValueError('API_KEY environment variable must be set. Run: python -c "import secrets; print(secrets.token_urlsafe(32))"')
+    raise ValueError(
+        'API_KEY environment variable must be set. '
+        'Run: python -c "import secrets; print(secrets.token_urlsafe(32))"'
+    )
+
+# Optional Redis backend for Flask-Limiter. Without it, rate limits are
+# per-worker (fine when the sidecar runs as a single process, as in the default
+# Docker setup, but inaccurate under multi-worker deployments).
+REDIS_URL = os.environ.get("REDIS_URL", "").strip()
 
 app = Flask(__name__)
-# SECURITY FIX Issue #3: No wildcard CORS - only explicit origins
-CORS(app, resources={r"/pqc/*": {"origins": ALLOWED_ORIGINS.split(",")}})
-limiter = Limiter(get_remote_address, app=app, default_limits=["60 per minute"])
+CORS(app, resources={r"/pqc/*": {"origins": ALLOWED_ORIGINS}})
+
+_limiter_kwargs = {}
+if REDIS_URL:
+    _limiter_kwargs["storage_uri"] = REDIS_URL
+else:
+    logger.info(
+        "REDIS_URL not set; Flask-Limiter is using in-memory storage. "
+        "Fine for the single-process sidecar default; set REDIS_URL if you "
+        "run multiple workers."
+    )
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["60 per minute"],
+    **_limiter_kwargs,
+)
 
 
 def require_api_key(f):
@@ -152,4 +181,32 @@ def decrypt():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PQC_PORT", 5001))
-    app.run(host="0.0.0.0", port=port, debug=os.environ.get("FLASK_DEBUG", "0") == "1")
+    host = os.environ.get("PQC_HOST", "0.0.0.0")
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+
+    # Same loopback-only guard as the main app: Werkzeug debugger = RCE.
+    # FOLD_ALLOW_DEBUG_BIND=1 opt-in is intended only for Docker dev profiles
+    # that pair it with a 127.0.0.1-only host-side port binding.
+    if debug:
+        try:
+            loopback_ok = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            loopback_ok = host == "localhost"
+        allow_nonloopback = os.environ.get("FOLD_ALLOW_DEBUG_BIND") == "1"
+        if not loopback_ok and not allow_nonloopback:
+            raise RuntimeError(
+                f"Refusing to start PQC Flask debug server on non-loopback "
+                f"host {host!r}. Set PQC_HOST=127.0.0.1, disable FLASK_DEBUG, "
+                f"or set FOLD_ALLOW_DEBUG_BIND=1 WITH a 127.0.0.1-only host "
+                f"port binding."
+            )
+        if loopback_ok:
+            logger.warning("PQC Flask debug mode is ENABLED on loopback only.")
+        else:
+            logger.warning(
+                "PQC Flask debug mode is ENABLED on non-loopback host %r "
+                "(FOLD_ALLOW_DEBUG_BIND=1). Ensure host port is 127.0.0.1-only.",
+                host,
+            )
+
+    app.run(host=host, port=port, debug=debug)
