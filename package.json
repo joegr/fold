@@ -2,7 +2,33 @@
   "name": "circuit-card-simulator",
   "version": "0.2.0",
   "private": true,
+<<<<<<< /Users/jg/fold/package.json
+<<<<<<< HEAD
   "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "start": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "echo 'no tests wired; add vitest if needed' && exit 0"
+  },
+=======
+<<<<<<< /Users/jg/fold/package.json
+>>>>>>> 01f2cd0 (leggo)
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.160.0"
+  },
+<<<<<<< HEAD
+  "devDependencies": {
+=======
+=======
+  "type": "module",
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/package.json
+=======
+  "type": "module",
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/package.json
   "scripts": {
     "dev": "vite",
     "start": "vite",
@@ -16,6 +42,19 @@
     "three": "^0.160.0"
   },
   "devDependencies": {
+<<<<<<< /Users/jg/fold/package.json
+<<<<<<< /Users/jg/fold/package.json
+    "@types/react": "^18.2.55",
+    "@types/react-dom": "^18.2.19",
+    "typescript": "^5.3.3"
+  },
+  "overrides": {
+    "nth-check": "^2.1.1",
+    "postcss": "^8.4.35"
+=======
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/package.json
     "@types/node": "^20.11.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
@@ -23,5 +62,12 @@
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "^5.5.3",
     "vite": "^7.3.0"
+<<<<<<< /Users/jg/fold/package.json
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/package.json
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/package.json
   }
 }

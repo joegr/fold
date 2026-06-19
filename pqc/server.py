@@ -22,19 +22,68 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 # SECURITY: Require explicit origins - no wildcard default
+<<<<<<< /Users/jg/fold/pqc/server.py
+<<<<<<< HEAD
 _raw_origins = os.environ.get("ALLOWED_ORIGINS", "")
 ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 if not ALLOWED_ORIGINS:
+=======
+<<<<<<< /Users/jg/fold/pqc/server.py
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "")
+if not ALLOWED_ORIGINS:
+    raise ValueError('ALLOWED_ORIGINS environment variable must be set. Example: http://localhost:3000,http://localhost:5000')
+=======
+_raw_origins = os.environ.get("ALLOWED_ORIGINS", "")
+ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+if not ALLOWED_ORIGINS:
+>>>>>>> 01f2cd0 (leggo)
+=======
+_raw_origins = os.environ.get("ALLOWED_ORIGINS", "")
+ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+if not ALLOWED_ORIGINS:
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/pqc/server.py
     raise ValueError(
         "ALLOWED_ORIGINS environment variable must be set. "
         "Example: http://localhost:3000,http://localhost:5000"
     )
 if any(o == "*" for o in ALLOWED_ORIGINS):
     raise ValueError("ALLOWED_ORIGINS must not contain a wildcard ('*').")
+<<<<<<< /Users/jg/fold/pqc/server.py
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/pqc/server.py
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/pqc/server.py
 
 # SECURITY: Require API key
 API_KEY = os.environ.get("API_KEY")
 if not API_KEY:
+<<<<<<< /Users/jg/fold/pqc/server.py
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/pqc/server.py
+    raise ValueError(
+        'API_KEY environment variable must be set. '
+        'Run: python -c "import secrets; print(secrets.token_urlsafe(32))"'
+    )
+
+# Optional Redis backend for Flask-Limiter. Without it, rate limits are
+# per-worker (fine when the sidecar runs as a single process, as in the default
+# Docker setup, but inaccurate under multi-worker deployments).
+REDIS_URL = os.environ.get("REDIS_URL", "").strip()
+
+<<<<<<< /Users/jg/fold/pqc/server.py
+app = Flask(__name__)
+=======
+<<<<<<< /Users/jg/fold/pqc/server.py
+    raise ValueError('API_KEY environment variable must be set. Run: python -c "import secrets; print(secrets.token_urlsafe(32))"')
+
+app = Flask(__name__)
+# SECURITY FIX Issue #3: No wildcard CORS - only explicit origins
+CORS(app, resources={r"/pqc/*": {"origins": ALLOWED_ORIGINS.split(",")}})
+limiter = Limiter(get_remote_address, app=app, default_limits=["60 per minute"])
+=======
     raise ValueError(
         'API_KEY environment variable must be set. '
         'Run: python -c "import secrets; print(secrets.token_urlsafe(32))"'
@@ -46,6 +95,10 @@ if not API_KEY:
 REDIS_URL = os.environ.get("REDIS_URL", "").strip()
 
 app = Flask(__name__)
+>>>>>>> 01f2cd0 (leggo)
+=======
+app = Flask(__name__)
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/pqc/server.py
 CORS(app, resources={r"/pqc/*": {"origins": ALLOWED_ORIGINS}})
 
 _limiter_kwargs = {}
@@ -63,6 +116,24 @@ limiter = Limiter(
     default_limits=["60 per minute"],
     **_limiter_kwargs,
 )
+<<<<<<< /Users/jg/fold/pqc/server.py
+<<<<<<< HEAD
+=======
+
+
+def require_api_key(f):
+    """Decorator that enforces API-key auth on all mutation endpoints."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        key = request.headers.get('X-API-Key', '')
+        if not hmac.compare_digest(key, API_KEY):
+            return jsonify({'error': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+    return decorated
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/pqc/server.py
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/pqc/server.py
 
 
 def require_api_key(f):

@@ -31,6 +31,18 @@ import time
 import urllib.request
 import urllib.error
 from urllib.parse import urlparse
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< /Users/jg/fold/app.py
+=======
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
+
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
@@ -41,6 +53,10 @@ from cryptography.hazmat.primitives import hashes
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
 ALLOWED_ORIGINS = [
     o.strip() for o in os.environ.get(
         'ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:5000'
@@ -52,6 +68,30 @@ if any(o == '*' for o in ALLOWED_ORIGINS):
 # API_KEY is still required for server-to-server clients; frontend no longer uses it.
 API_KEY = os.environ.get('API_KEY')
 if not API_KEY:
+<<<<<<< /Users/jg/fold/app.py
+=======
+<<<<<<< /Users/jg/fold/app.py
+ALLOWED_ORIGINS = os.environ.get(
+    'ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:5000'
+).split(',')
+API_KEY = os.environ.get('API_KEY')
+if not API_KEY:
+    raise ValueError('API_KEY environment variable must be set. Run: python -c "import secrets; print(secrets.token_urlsafe(32))"')
+=======
+ALLOWED_ORIGINS = [
+    o.strip() for o in os.environ.get(
+        'ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:5000'
+    ).split(',') if o.strip()
+]
+if any(o == '*' for o in ALLOWED_ORIGINS):
+    raise ValueError("ALLOWED_ORIGINS must not contain a wildcard ('*').")
+
+# API_KEY is still required for server-to-server clients; frontend no longer uses it.
+API_KEY = os.environ.get('API_KEY')
+if not API_KEY:
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
     raise ValueError(
         'API_KEY environment variable must be set. '
         'Run: python -c "import secrets; print(secrets.token_urlsafe(32))"'
@@ -64,6 +104,13 @@ if not SECRET_KEY:
         'Run: python -c "import os; print(os.urandom(32).hex())"'
     )
 
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
 MAX_CARDS = int(os.environ.get('MAX_CARDS', '20'))
 MAX_NODES_PER_CARD = int(os.environ.get('MAX_NODES_PER_CARD', '16'))
 MAX_REQUEST_SIZE = int(os.environ.get('MAX_REQUEST_SIZE', str(1 * 1024 * 1024)))  # 1 MB
@@ -71,6 +118,90 @@ MAX_HISTORY_RECORDS = int(os.environ.get('MAX_HISTORY_RECORDS', '200'))
 MAX_HISTORY_USERS = int(os.environ.get('MAX_HISTORY_USERS', '1000'))
 PQC_SERVICE_URL = os.environ.get('PQC_SERVICE_URL', 'http://localhost:5001')
 
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+# Reverse-proxy / limiter configuration
+TRUSTED_PROXY_HOPS = int(os.environ.get('TRUSTED_PROXY_HOPS', '0'))
+REDIS_URL = os.environ.get('REDIS_URL', '').strip()
+
+# Explicit internal service-name allowlist for SSRF protection.
+_INTERNAL_SERVICE_NAMES = frozenset(
+    n.strip() for n in os.environ.get(
+        'PQC_ALLOWED_HOSTNAMES', 'pqc,localhost'
+    ).split(',') if n.strip()
+)
+
+<<<<<<< /Users/jg/fold/app.py
+=======
+<<<<<<< /Users/jg/fold/app.py
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+
+def _validate_pqc_url(url: str) -> str:
+    """Validate PQC service URL to prevent SSRF.
+
+    Accepts:
+      * Explicit allowlisted service names (PQC_ALLOWED_HOSTNAMES env).
+      * IP addresses in RFC1918 / loopback / link-local ranges (IPv4+IPv6).
+      * *.local DNS names (mDNS).
+    Rejects everything else, including bareword hostnames not on the allowlist
+    and public IPs in unusual encodings (decimal/octal/hex int-as-host).
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ('http', 'https'):
+        raise ValueError(f'Invalid PQC_SERVICE_URL scheme: {parsed.scheme!r}')
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError('Invalid PQC_SERVICE_URL: no hostname')
+
+    # Explicit allowlist of internal service names.
+    if hostname in _INTERNAL_SERVICE_NAMES:
+        return url
+    if hostname.endswith('.local'):
+        return url
+
+    # IP literal? Parse strictly via `ipaddress`.
+    try:
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+=======
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        
+        if not hostname:
+            raise ValueError('Invalid URL: no hostname')
+        
+        # Allow localhost variants
+        if hostname in ('localhost', '127.0.0.1', '::1'):
+            return url
+        
+        # Allow internal Docker service names (no dots, or .local domain)
+        if '.' not in hostname or hostname.endswith('.local'):
+            return url
+        
+        # Check private IP ranges
+        parts = hostname.split('.')
+        if len(parts) == 4 and all(p.isdigit() for p in parts):
+            # 10.0.0.0/8
+            if parts[0] == '10':
+                return url
+            # 172.16.0.0/12
+            if parts[0] == '172' and 16 <= int(parts[1]) <= 31:
+                return url
+            # 192.168.0.0/16
+            if parts[0] == '192' and parts[1] == '168':
+                return url
+            # 127.0.0.0/8 (loopback)
+            if parts[0] == '127':
+                return url
+        
+        raise ValueError(f'PQC_SERVICE_URL must be an internal address, got: {hostname}')
+    except ValueError as e:
+        raise ValueError(f'Invalid PQC_SERVICE_URL: {e}')
+=======
 # Reverse-proxy / limiter configuration
 TRUSTED_PROXY_HOPS = int(os.environ.get('TRUSTED_PROXY_HOPS', '0'))
 REDIS_URL = os.environ.get('REDIS_URL', '').strip()
@@ -108,6 +239,9 @@ def _validate_pqc_url(url: str) -> str:
 
     # IP literal? Parse strictly via `ipaddress`.
     try:
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
         ip = ipaddress.ip_address(hostname)
     except ValueError:
         raise ValueError(
@@ -120,12 +254,30 @@ def _validate_pqc_url(url: str) -> str:
             f'PQC_SERVICE_URL IP {ip} is not loopback/private/link-local.'
         )
     return url
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
 
 
 # Validate PQC URL on startup
 PQC_SERVICE_URL = _validate_pqc_url(PQC_SERVICE_URL)
 
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
 
+=======
+<<<<<<< /Users/jg/fold/app.py
+=======
+
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+>>>>>>> 01f2cd0 (leggo)
+=======
+
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
@@ -138,7 +290,26 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 app = Flask(__name__, static_folder='build')
 app.config['MAX_CONTENT_LENGTH'] = MAX_REQUEST_SIZE
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
 app.config['SECRET_KEY'] = SECRET_KEY
+=======
+<<<<<<< /Users/jg/fold/app.py
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    raise ValueError('SECRET_KEY environment variable must be set. Run: python -c "import os; print(os.urandom(32).hex())"')
+app.config['SECRET_KEY'] = SECRET_KEY
+CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
+limiter = Limiter(get_remote_address, app=app, default_limits=["60 per minute"])
+# SECURITY FIX Issue #5: Per-user isolated history storage
+# Keyed by a hash of API key + IP (simple user identification)
+encryption_records_by_user = {}
+=======
+app.config['SECRET_KEY'] = SECRET_KEY
+>>>>>>> 01f2cd0 (leggo)
+=======
+app.config['SECRET_KEY'] = SECRET_KEY
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
 # Cookie hardening. SESSION_COOKIE_SECURE defaults to True; set to "0" to
 # disable explicitly when developing over plain HTTP on localhost.
 app.config['SESSION_COOKIE_HTTPONLY'] = True
@@ -183,6 +354,13 @@ limiter = Limiter(
 # falling back to a per-IP hash. The previous "per-user" claim that was really
 # per-IP is now enforced by the session cookie path.
 encryption_records_by_user: "dict[str, list[dict]]" = {}
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
 
 ALLOWED_GATE_TYPES = frozenset({'AND', 'OR', 'XOR', 'NOT', 'NAND', 'NOR', 'BUFFER'})
 ALLOWED_CARD_TYPES = frozenset({
@@ -194,6 +372,7 @@ ALLOWED_CARD_TYPES = frozenset({
 
 # ---------------------------------------------------------------------------
 # Signing key — derived via HKDF from SECRET_KEY, never the API_KEY.
+<<<<<<< /Users/jg/fold/app.py
 # ---------------------------------------------------------------------------
 def _derive_signing_key() -> bytes:
     return HKDF(
@@ -214,6 +393,28 @@ def _sign(payload: bytes) -> str:
 # ---------------------------------------------------------------------------
 # Security helpers — auth
 # ---------------------------------------------------------------------------
+=======
+# ---------------------------------------------------------------------------
+def _derive_signing_key() -> bytes:
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=b'fold-signing-v1',
+        info=b'algorithm-integrity-signature',
+    ).derive(SECRET_KEY.encode() if isinstance(SECRET_KEY, str) else SECRET_KEY)
+
+
+_SIGNING_KEY = _derive_signing_key()
+
+
+def _sign(payload: bytes) -> str:
+    return hmac.new(_SIGNING_KEY, payload, hashlib.sha256).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Security helpers — auth
+# ---------------------------------------------------------------------------
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
 def _has_valid_api_key() -> bool:
     key = request.headers.get('X-API-Key', '')
     if not key:
@@ -227,6 +428,10 @@ def _has_valid_session() -> bool:
 
 def require_auth(f):
     """Accept either a signed Flask session cookie or a valid X-API-Key header."""
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
     @wraps(f)
     def decorated(*args, **kwargs):
         if _has_valid_session() or _has_valid_api_key():
@@ -236,16 +441,86 @@ def require_auth(f):
 
 
 def require_api_key(f):
+<<<<<<< /Users/jg/fold/app.py
+=======
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if _has_valid_session() or _has_valid_api_key():
+            return f(*args, **kwargs)
+        return jsonify({'error': 'Unauthorized'}), 401
+    return decorated
+
+
+def require_api_key(f):
+<<<<<<< /Users/jg/fold/app.py
+    """Decorator that enforces API-key auth."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        key = request.headers.get('X-API-Key', '')
+        if not hmac.compare_digest(key, API_KEY):
+            return jsonify({'error': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+=======
+>>>>>>> 01f2cd0 (leggo)
     """Stricter auth for server-to-server endpoints only."""
     @wraps(f)
     def decorated(*args, **kwargs):
         if _has_valid_api_key():
             return f(*args, **kwargs)
         return jsonify({'error': 'Unauthorized'}), 401
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+>>>>>>> 01f2cd0 (leggo)
+=======
+    """Stricter auth for server-to-server endpoints only."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if _has_valid_api_key():
+            return f(*args, **kwargs)
+        return jsonify({'error': 'Unauthorized'}), 401
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
     return decorated
 
 
 def _get_user_id() -> str:
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+    """Stable per-caller identifier.
+
+    Preference order:
+      1. Session id (set by /api/session; unique per browser).
+      2. API-key callers collapse to a single namespace 'apikey'.
+      3. Anonymous callers fall back to a hashed remote address.
+<<<<<<< /Users/jg/fold/app.py
+=======
+<<<<<<< /Users/jg/fold/app.py
+    """Generate a unique identifier for the current user.
+    
+    SECURITY FIX Issue #5: Creates per-user isolation based on API key + IP.
+    This ensures each user only sees their own history records.
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+    """
+    sid = session.get('sid')
+    if sid:
+        return f'sess:{sid}'
+    if _has_valid_api_key():
+        return 'apikey'
+    ip = get_remote_address() or '0.0.0.0'
+    return 'ip:' + hashlib.sha256(ip.encode()).hexdigest()[:24]
+
+
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+# ---------------------------------------------------------------------------
+# Input validation
+# ---------------------------------------------------------------------------
+=======
+=======
     """Stable per-caller identifier.
 
     Preference order:
@@ -265,6 +540,13 @@ def _get_user_id() -> str:
 # ---------------------------------------------------------------------------
 # Input validation
 # ---------------------------------------------------------------------------
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+>>>>>>> 01f2cd0 (leggo)
+=======
+# ---------------------------------------------------------------------------
+# Input validation
+# ---------------------------------------------------------------------------
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
 def _safe_float(val, default=0.0):
     """Convert to float, rejecting inf/nan and non-numeric values."""
     try:
@@ -376,16 +658,58 @@ def validate_circuit_data(data):
 def add_security_headers(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+=======
+<<<<<<< /Users/jg/fold/app.py
+    # SECURITY FIX Issue #10: Removed deprecated X-XSS-Protection header
+    # (deprecated by all major browsers, can introduce XSS vulnerabilities)
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    # SECURITY FIX Issue #11: Added HSTS header for HTTPS deployments
+    # Max age: 1 year, includeSubDomains, preload
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
+    # SECURITY FIX Issue #16: Added Permissions-Policy header
+=======
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+>>>>>>> 01f2cd0 (leggo)
+=======
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
     # HSTS only over HTTPS.
     if request.is_secure:
         response.headers['Strict-Transport-Security'] = (
             'max-age=31536000; includeSubDomains; preload'
         )
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
     response.headers['Permissions-Policy'] = (
         'camera=(), microphone=(), geolocation=(), accelerometer=(), '
         'gyroscope=(), magnetometer=(), payment=(), usb=(), midi=()'
     )
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+=======
+<<<<<<< /Users/jg/fold/app.py
+    # SECURITY NOTE Issue #12: style-src uses 'unsafe-inline' because React
+    # components in this codebase use inline style props extensively. Removing it
+    # would break the UI. To harden this, consider:
+    # 1. Using a CSP nonce (requires server-side rendering)
+    # 2. Moving all styles to external CSS files
+    # 3. Using styled-components with babel-plugin-styled-components
+    # The XSS risk is LOW here because:
+    # - No user-controlled data is rendered into style attributes
+    # - style-src does not execute code like script-src
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
     )
@@ -619,6 +943,40 @@ def api_generate_encryption():
             'complexity': analysis['summary']['complexity_score'],
             'circuit_seed': parameters['circuit_seed'],
         }
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+=======
+<<<<<<< /Users/jg/fold/app.py
+        # SECURITY FIX Issue #5: Per-user isolated storage
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+        user_id = _get_user_id()
+        bucket = encryption_records_by_user.setdefault(user_id, [])
+        bucket.append(record)
+        while len(bucket) > MAX_HISTORY_RECORDS:
+            bucket.pop(0)
+        # Global cap on distinct users to prevent unbounded memory growth.
+        while len(encryption_records_by_user) > MAX_HISTORY_USERS:
+            # Drop an arbitrary oldest key (dict insertion order).
+            victim = next(iter(encryption_records_by_user))
+            if victim == user_id:
+                break
+            encryption_records_by_user.pop(victim, None)
+
+        # Sign the parameters with a key derived from SECRET_KEY (not API_KEY).
+        param_bytes = _canonical_info(parameters)
+        signature = _sign(param_bytes)
+
+        return jsonify({
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+            'parameters': parameters,
+            'parameters_signature': signature,
+=======
+            'algorithm': algorithm,
+            'algorithm_signature': algorithm_signature,  # HMAC-SHA256 for integrity
+=======
         user_id = _get_user_id()
         bucket = encryption_records_by_user.setdefault(user_id, [])
         bucket.append(record)
@@ -639,6 +997,12 @@ def api_generate_encryption():
         return jsonify({
             'parameters': parameters,
             'parameters_signature': signature,
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+>>>>>>> 01f2cd0 (leggo)
+=======
+            'parameters': parameters,
+            'parameters_signature': signature,
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
             'analysis': analysis['summary'],
         })
 
@@ -651,11 +1015,35 @@ def api_generate_encryption():
 @require_auth
 @limiter.limit("60 per minute")
 def api_history():
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
     user_id = _get_user_id()
+=======
+<<<<<<< /Users/jg/fold/app.py
+    """Get history of encryption algorithms generated by the current user.
+    
+    SECURITY FIX Issue #5: Returns only records for the authenticated user.
+    """
+    user_id = _get_user_id()
+    user_records = encryption_records_by_user.get(user_id, [])
+    return jsonify({'records': user_records, 'user_isolated': True})
+=======
+    user_id = _get_user_id()
+>>>>>>> 01f2cd0 (leggo)
+=======
+    user_id = _get_user_id()
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
     return jsonify({
         'records': encryption_records_by_user.get(user_id, []),
         'user_isolated': True,
     })
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
 
 
 @app.route('/', defaults={'path': ''})
@@ -768,6 +1156,10 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     host = os.environ.get('HOST', '0.0.0.0')
     debug = os.environ.get('FLASK_DEBUG', '0') == '1'
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
 
     # M1: Refuse to start with FLASK_DEBUG=1 unless bound to loopback.
     # The Werkzeug debugger is effectively an RCE on any client that can
@@ -775,6 +1167,31 @@ if __name__ == '__main__':
     # used by the Docker `dev` profile, which pairs it with a host-side
     # port binding of 127.0.0.1 only — see docker-compose.yml.
     if debug:
+<<<<<<< /Users/jg/fold/app.py
+=======
+<<<<<<< /Users/jg/fold/app.py
+    
+    # SECURITY FIX Issue #13: Warn about or block debug mode in production
+    if debug:
+        logger.warning('=' * 60)
+        logger.warning('WARNING: Flask debug mode is ENABLED!')
+        logger.warning('Debug mode allows arbitrary code execution via')
+        logger.warning('the interactive debugger console. NEVER enable in')
+        logger.warning('production or on publicly accessible servers!')
+        logger.warning('=' * 60)
+    
+    app.run(host='0.0.0.0', port=port, debug=debug)
+=======
+
+    # M1: Refuse to start with FLASK_DEBUG=1 unless bound to loopback.
+    # The Werkzeug debugger is effectively an RCE on any client that can
+    # reach the port. The explicit FOLD_ALLOW_DEBUG_BIND=1 escape hatch is
+    # used by the Docker `dev` profile, which pairs it with a host-side
+    # port binding of 127.0.0.1 only — see docker-compose.yml.
+    if debug:
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
         try:
             host_ip = ipaddress.ip_address(host)
             loopback_ok = host_ip.is_loopback
@@ -800,3 +1217,10 @@ if __name__ == '__main__':
             )
 
     app.run(host=host, port=port, debug=debug)
+<<<<<<< /Users/jg/fold/app.py
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/app.py

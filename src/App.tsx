@@ -64,7 +64,24 @@ const App: React.FC = () => {
     }
     setIsLoading(true);
     try {
+<<<<<<< /Users/jg/fold/src/App.tsx
+<<<<<<< HEAD
       // Step 1: classical analysis + parameters
+=======
+<<<<<<< /Users/jg/fold/src/App.tsx
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      // SECURITY FIX Issue #15: Remove window global access - only use build-time env var
+      const apiKey = process.env.REACT_APP_API_KEY;
+      if (apiKey) headers['X-API-Key'] = apiKey;
+
+      // Step 1: generate classical analysis
+=======
+      // Step 1: classical analysis + parameters
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/src/App.tsx
+>>>>>>> 01f2cd0 (leggo)
+=======
+      // Step 1: classical analysis + parameters
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/src/App.tsx
       const analysisResp = await fetch('/api/generate_encryption', {
         method: 'POST',
         credentials: 'include',
@@ -84,13 +101,39 @@ const App: React.FC = () => {
       if (!keypairResp.ok) throw new Error(`PQC keypair failed: ${keypairResp.status}`);
       const keypairData = await keypairResp.json();
       setPqcPublicKey(keypairData.public_key);
+<<<<<<< /Users/jg/fold/src/App.tsx
+<<<<<<< HEAD
 
+=======
+<<<<<<< /Users/jg/fold/src/App.tsx
+      // SECURITY FIX: Secret key is NEVER returned by server
+      // Client must provide their own secret_key for decrypt operations
+      // For this demo, we generate a placeholder - in production, use secure client-side storage
+      const clientSecretKey = prompt('Enter your secret key (base64), or leave blank to skip decrypt test:');
+      if (clientSecretKey) {
+        setPqcSecretKey(clientSecretKey);
+      }
+
+      // Step 3: test encrypt (decrypt requires client-provided secret_key)
+=======
+
+>>>>>>> 01f2cd0 (leggo)
+=======
+
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/src/App.tsx
       // Note: the server never returns a secret key. Decrypt is only
       // exercised when the user supplies one they already hold.
       const clientSecretKey = prompt('Enter your secret key (base64), or leave blank to skip decrypt test:');
       if (clientSecretKey) setPqcSecretKey(clientSecretKey);
 
       // Step 3: encrypt
+<<<<<<< /Users/jg/fold/src/App.tsx
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/src/App.tsx
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/src/App.tsx
       const encResp = await fetch('/api/pqc/encrypt', {
         method: 'POST',
         credentials: 'include',
@@ -104,14 +147,40 @@ const App: React.FC = () => {
       if (!encResp.ok) throw new Error(`PQC encrypt failed: ${encResp.status}`);
       const encData = await encResp.json();
 
+<<<<<<< /Users/jg/fold/src/App.tsx
+<<<<<<< HEAD
       // Step 4: optional decrypt (client-supplied secret key only)
+=======
+<<<<<<< /Users/jg/fold/src/App.tsx
+      // Step 4: test decrypt only if client provided a secret key
+=======
+      // Step 4: optional decrypt (client-supplied secret key only)
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/src/App.tsx
+>>>>>>> 01f2cd0 (leggo)
+=======
+      // Step 4: optional decrypt (client-supplied secret key only)
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/src/App.tsx
       let decryptResult = '[Skipped - no secret key provided]';
       if (pqcSecretKey || clientSecretKey) {
         const secretKeyToUse = pqcSecretKey || clientSecretKey;
         const decResp = await fetch('/api/pqc/decrypt', {
           method: 'POST',
+<<<<<<< /Users/jg/fold/src/App.tsx
+<<<<<<< HEAD
           credentials: 'include',
           headers: jsonHeaders,
+=======
+<<<<<<< /Users/jg/fold/src/App.tsx
+          headers,
+=======
+          credentials: 'include',
+          headers: jsonHeaders,
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/src/App.tsx
+>>>>>>> 01f2cd0 (leggo)
+=======
+          credentials: 'include',
+          headers: jsonHeaders,
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/src/App.tsx
           body: JSON.stringify({
             circuit_analysis: analysisData.analysis,
             secret_key: secretKeyToUse,
@@ -134,7 +203,19 @@ const App: React.FC = () => {
         '',
         '# --- Keypair ---',
         `public_key  = "${keypairData.public_key.substring(0, 64)}..."  # ${keypairData.public_key.length} chars (base64)`,
+<<<<<<< /Users/jg/fold/src/App.tsx
+<<<<<<< HEAD
         `secret_key  = "[CLIENT-MANAGED - never transmitted]"`,
+=======
+<<<<<<< /Users/jg/fold/src/App.tsx
+        `secret_key  = "[CLIENT-MANAGED - never transmitted]",`,
+=======
+        `secret_key  = "[CLIENT-MANAGED - never transmitted]"`,
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/src/App.tsx
+>>>>>>> 01f2cd0 (leggo)
+=======
+        `secret_key  = "[CLIENT-MANAGED - never transmitted]"`,
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/src/App.tsx
         '',
         '# --- Encrypt ---',
         `kem_ciphertext = "${encData.kem_ciphertext.substring(0, 64)}..."`,
@@ -164,6 +245,24 @@ const App: React.FC = () => {
 
     setIsLoading(true);
     try {
+<<<<<<< /Users/jg/fold/src/App.tsx
+<<<<<<< HEAD
+=======
+<<<<<<< /Users/jg/fold/src/App.tsx
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      // SECURITY FIX Issue #15: Remove window global access - only use build-time env var
+      const apiKey = process.env.REACT_APP_API_KEY;
+      if (apiKey) {
+        headers['X-API-Key'] = apiKey;
+      }
+
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/src/App.tsx
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/src/App.tsx
       const response = await fetch('/api/generate_encryption', {
         method: 'POST',
         credentials: 'include',

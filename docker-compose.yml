@@ -75,11 +75,26 @@ services:
       - FLASK_DEBUG=0
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5000}
       - API_KEY=${API_KEY}  # SECURITY: Required API key
+<<<<<<< /Users/jg/fold/docker-compose.yml
+<<<<<<< HEAD
+=======
+<<<<<<< /Users/jg/fold/docker-compose.yml
+=======
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/docker-compose.yml
       # Use DB 1 so pqc counters don't collide with the main app on DB 0.
       - REDIS_URL=redis://redis:6379/1
     depends_on:
       redis:
         condition: service_healthy
+<<<<<<< /Users/jg/fold/docker-compose.yml
+<<<<<<< HEAD
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/docker-compose.yml
+>>>>>>> 01f2cd0 (leggo)
+=======
+>>>>>>> /Users/jg/.windsurf/worktrees/fold/fold-2fd31619/docker-compose.yml
     restart: unless-stopped
     read_only: true
     tmpfs:
